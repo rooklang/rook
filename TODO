@@ -1,5 +1,4 @@
-string unescaping ("\n" -> 0x0a)
-true / nil struct values
 (eq x y) form
 (set var val) form
+(quote x) form
 number support

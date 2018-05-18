@@ -9,6 +9,9 @@
 
 struct value;
 
+static struct value *ROOK_TRUE;
+static struct value *ROOK_FALSE;
+
 struct cons {
 	struct value *car;
 	struct value *cdr;
@@ -27,12 +30,14 @@ struct value {
 	enum {
 		CONS,
 		STRING,
-		SYMBOL
+		SYMBOL,
+		BOOLEAN,
 	} type;
 	union {
 		struct cons    cons;
 		struct string  string;
 		struct symbol *symbol;
+		char           boolean;
 	};
 };
 
@@ -144,13 +149,43 @@ static struct value *
 new_string(const char *src)
 {
 	struct value *v;
-	size_t n = strlen(src);
+	char *ins, *head, *end;
+	size_t i, n;
 
+	n = strlen(src);
 	v = make(struct value);
 	v->type = STRING;
 	v->string.data = mems(n, char);
 	v->string.len = n;
 	memcpy(v->string.data, src, n);
+
+	/* unescape */
+	ins = head = v->string.data;
+	end = head + v->string.len;
+	while (head != end) {
+		if (*head == '\\') {
+			v->string.len--;
+			head++;
+			if (head == end) {
+				fprintf(stderr, "dangling escape character!\n");
+				exit(1);
+			}
+			switch (*head) {
+			case 't' : *ins++ = '\t'; break;
+			case 'r' : *ins++ = '\r'; break;
+			case 'n' : *ins++ = '\n'; break;
+			case '\\': *ins++ = '\\'; break;
+			case '0' : *ins++ = '\0'; break;
+			default:   *ins++ = *head;
+			}
+			head++;
+		} else {
+			*ins++ = *head++;
+		}
+	}
+	if (n != v->string.len)
+		*ins = '\0';
+
 	return v;
 }
 
@@ -178,8 +213,7 @@ free_value(struct value *v)
 		free(v->symbol);
 		break;
 
-	case CONS:
-		/* noop */
+	default: /* noop */
 		break;
 	}
 
@@ -207,6 +241,10 @@ fprintv(FILE *io, int in, struct value *v)
 
 	case STRING:
 		fprintf(io, "%s\"%s\"", pre, v->string.data);
+		break;
+
+	case BOOLEAN:
+		fprintf(io, "%s#%c", pre, v->boolean ? 't' : 'f');
 		break;
 
 	case SYMBOL:
@@ -455,6 +493,18 @@ parse(const char *file, const char *src)
 	return stack[0];
 }
 
+static char
+truthy(struct value *cond)
+{
+	switch (cond->type) {
+	default:      return 0; /* UNKNOWN */
+	case CONS:    return (cond->cons.car || cond->cons.cdr) ? 1 : 0;
+	case STRING:  return cond->string.len != 0              ? 1 : 0;
+	case SYMBOL:  return 1; /* FIXME */
+	case BOOLEAN: return cond->boolean;
+	}
+}
+
 static struct value *
 eval(struct value *expr, struct env *env)
 {
@@ -473,7 +523,7 @@ eval(struct value *expr, struct env *env)
 				cond = eval(tail->cons.car, env);
 				tail = tail->cons.cdr;
 
-				if (cond) {
+				if (truthy(cond)) {
 					return eval(tail->cons.car, env);
 				} else {
 					tail = tail->cons.cdr;
@@ -481,8 +531,20 @@ eval(struct value *expr, struct env *env)
 				}
 			}
 			if (head->symbol == intern("printf")) {
-				fprintv(stdout, 0, eval(tail->cons.car, env));
-				return head;
+				head = eval(tail->cons.car, env);
+				if (head->type != STRING) {
+					fprintf(stderr, "non-string argument to printf!\n");
+					exit(2);
+				}
+				fprintf(stdout, "%s", head->string.data); /* FIXME: doesn't handle \0 embedded */
+				return ROOK_TRUE;
+			}
+			if (head->symbol == intern("eq")) {
+				struct value *a, *b;
+				a = eval(tail->cons.car, env);
+				tail = tail->cons.cdr;
+				b = eval(tail->cons.car, env);
+				return a == b ? ROOK_TRUE : ROOK_FALSE;
 			}
 			return head; /* FIXME */
 		} else {
@@ -495,12 +557,24 @@ eval(struct value *expr, struct env *env)
 		return expr;
 
 	case SYMBOL:
-		return get(env, expr);
+		return get(env, expr->symbol);
 
 	default:
 		fprintf(stderr, "semantic error\n");
 		exit(2);
 	}
+}
+
+static void
+init()
+{
+	ROOK_TRUE = make(struct value);
+	ROOK_TRUE->type = BOOLEAN;
+	ROOK_TRUE->boolean = 1;
+
+	ROOK_FALSE = make(struct value);
+	ROOK_FALSE->type = BOOLEAN;
+	ROOK_TRUE->boolean = 0;
 }
 
 int
@@ -515,6 +589,8 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+	init();
+
 	src = slurp(argv[1]);
 	if (!src) {
 		fprintf(stderr, "%s: %s (error %d)\n", argv[1], strerror(errno), errno);
@@ -528,7 +604,7 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	fprintv(stdout, 0, ast);
+	//fprintv(stdout, 0, ast);
 	free_value(ast);
 	free(src);
 	return 0;
