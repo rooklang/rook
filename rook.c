@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -22,7 +23,6 @@ struct symbol {
 	char *name;
 };
 
-
 struct value {
 	enum {
 		CONS,
@@ -36,6 +36,14 @@ struct value {
 	};
 };
 
+/* FIXME: this is woefully inefficient */
+struct symtab_ent {
+	struct symbol     *symbol;
+	struct symtab_ent *next;
+};
+struct symtab {
+	struct symtab_ent *head;
+};
 void *
 mem(size_t n)
 {
@@ -48,6 +56,77 @@ mem(size_t n)
 }
 #define mems(n,t) (mem((n)*sizeof(t)))
 #define make(obj) (mem(sizeof(obj)))
+
+static struct symtab SYMBOLS = {0};
+
+static struct symbol *
+intern(const char *name)
+{
+	struct symtab_ent *e;
+
+	for (e = SYMBOLS.head; e; e = e->next) {
+		if (strcmp(e->symbol->name, name) == 0) {
+			return e->symbol;
+		}
+	}
+	e = make(struct symtab_ent);
+	e->next = SYMBOLS.head;
+	e->symbol = make(struct symbol);
+	e->symbol->name = strdup(name);
+	SYMBOLS.head = e;
+	return e->symbol;
+}
+
+struct binding {
+	struct symbol  *symbol;
+	struct value   *value;
+	struct binding *next;
+};
+struct env {
+	struct binding *head;
+};
+
+static struct value *
+get(struct env *env, struct symbol *symbol)
+{
+	struct binding *b;
+	for (b = env->head; b; b = b->next) {
+		if (b->symbol == symbol) {
+			return b->value;
+		}
+	}
+	return NULL;
+}
+
+static struct value *
+set(struct env *env, struct symbol *symbol, struct value *value)
+{
+	struct binding *b;
+	for (b = env->head; b; b = b->next) {
+		if (b->symbol == symbol) {
+			b->value = value;
+			return b->value;
+		}
+	}
+	b = make(struct binding);
+	b->symbol = symbol;
+	b->value  = value;
+	b->next   = env->head;
+	env->head = b;
+	return b->value;
+}
+
+static struct value *
+def(struct env *env, struct symbol *symbol, struct value *value)
+{
+	struct binding *b;
+	b = make(struct binding);
+	b->symbol = symbol;
+	b->value  = value;
+	b->next   = env->head;
+	env->head = b;
+	return b->value;
+}
 
 static struct value *
 new_cons(struct value *car, struct value *cdr)
@@ -62,9 +141,10 @@ new_cons(struct value *car, struct value *cdr)
 }
 
 static struct value *
-new_string(const char *src, size_t n)
+new_string(const char *src)
 {
 	struct value *v;
+	size_t n = strlen(src);
 
 	v = make(struct value);
 	v->type = STRING;
@@ -81,8 +161,7 @@ new_symbol(const char *name)
 
 	v = make(struct value);
 	v->type = SYMBOL;
-	v->symbol = make(struct symbol);
-	v->symbol->name = strdup(name);
+	v->symbol = intern(name);
 	return v;
 }
 
@@ -117,11 +196,13 @@ fprintv(FILE *io, int in, struct value *v)
 
 	switch (v->type) {
 	case CONS:
-		fprintf(io, "%s(", pre);
+		fprintf(io, "%s(cons ", pre);
 		fprintv(io, 0, v->cons.car);
-		fprintf(io, "\n");
-		fprintv(io, in+1, v->cons.cdr);
-		fprintf(io, ")\n");
+		if (v->cons.cdr) {
+			fprintf(io, "\n");
+			fprintv(io, in+6, v->cons.cdr);
+		}
+		fprintf(io, ")");
 		break;
 
 	case STRING:
@@ -170,6 +251,7 @@ enum ttype {
 	T_CLOSEP,
 	T_IDENT,
 	T_STRING,
+	T_OOPS,
 };
 
 struct pos {
@@ -258,6 +340,8 @@ lexeme(struct lexer *l)
 static inline char
 peek(struct lexer *l)
 {
+	//fprintf(stderr, "PEEK: [%d] = ", l->head.offset);
+	//fprintf(stderr, "%02x (%c)\n", l->src[l->head.offset], l->src[l->head.offset]);
 	return l->src[l->head.offset];
 }
 
@@ -272,8 +356,6 @@ peek(struct lexer *l)
 static inline char
 next(struct lexer *l)
 {
-	char c = peek(l);
-
 	l->head.offset++;
 	l->head.column++;
 	if (l->src[l->head.offset] == '\n') {
@@ -281,7 +363,7 @@ next(struct lexer *l)
 		l->head.line++;
 	}
 
-	return c;
+	return peek(l);
 }
 
 /* resync(&lexer)
@@ -293,48 +375,132 @@ static inline void
 resync(struct lexer *l)
 {
 	copy_pos(&l->prev, &l->head);
+	//fprintf(stderr, "RESYNC AT [%d]\n", l->prev.offset);
 }
 
 static struct token *
 lex(struct lexer *l)
 {
-	char c;
+	char c, q, esc;
+	struct token *tok;
 
 	/* eat whitespace */
-	for (c = next(l); c && isspace(c); c = next(l));
+	for (c = peek(l); c && isspace(c); next(l), c = peek(l));
 	resync(l);
 
 	switch (c) {
 	case '\0': return NULL;
 
-	case '(': return new_token(l, T_OPENP, NULL);
-	case ')': return new_token(l, T_CLOSEP, NULL);
-	//case '"':
-	//case ':':
+	case '(': next(l); return new_token(l, T_OPENP, NULL);
+	case ')': next(l); return new_token(l, T_CLOSEP, NULL);
+	case '"':
+		esc = 0; q = c; next(l); resync(l);
+		for (c = peek(l); c && (esc || c != q); next(l), c = peek(l));
+		tok = new_token(l, T_STRING, lexeme(l)); // fixme
+		next(l); return tok;
 	}
 	if (c && isalpha(c)) {
-		for (c = next(l); c && !isspace(c); c = next(l));
+		for (c = peek(l); c && !isspace(c); next(l), c = peek(l));
 		return new_token(l, T_IDENT, lexeme(l));
 	}
-	return NULL;
+
+	return new_token(l, T_OOPS, "syntax error");
 }
+
+#define PSTACK 4096
 
 static struct value *
 parse(const char *file, const char *src)
 {
-	int i;
 	struct lexer l;
 	struct token *token;
+	struct value *value, **stack;
+	int top;
 
+	l.src = src;
 	init_pos(&l.head, src);
 	init_pos(&l.prev, src);
 
+	top = -1;
+	stack = mems(PSTACK + 1, struct value *);
+
 	while ((token = lex(&l)) != NULL) {
-		fprintf(stderr, "token %d, %p %s\n", token->type, token->data, token->data);
+		if (top == PSTACK) {
+			fprintf(stderr, "pstack overflow\n");
+			exit(1);
+		}
+		switch (token->type) {
+		case T_OPENP:  stack[++top] = NULL;                    break;
+		case T_IDENT:  stack[++top] = new_symbol(token->data); break;
+		case T_STRING: stack[++top] = new_string(token->data); break;
+		case T_CLOSEP:
+			value = NULL;
+			while (top >= 0) {
+				if (!stack[top]) { /* NULL is the '(' marker */
+					stack[top] = value ? value : new_cons(NULL, NULL);
+					break;
+				}
+				value = new_cons(stack[top--], value);
+			}
+			break;
+
+		case T_OOPS:
+			fprintf(stderr, "oops: %s\n", token->data);
+			exit(1);
+		}
+
 		free_token(token);
 	}
 
-	return NULL;
+	return stack[0];
+}
+
+static struct value *
+eval(struct value *expr, struct env *env)
+{
+	/* FIXME: no environment yet... */
+
+	struct value *head, *tail, *cond;
+
+	switch (expr->type) {
+	case CONS: /* (op ...) form */
+		head = expr->cons.car;
+		if (!head) return expr;
+		tail = expr->cons.cdr;
+
+		if (head->type == SYMBOL) {
+			if (head->symbol == intern("if")) {
+				cond = eval(tail->cons.car, env);
+				tail = tail->cons.cdr;
+
+				if (cond) {
+					return eval(tail->cons.car, env);
+				} else {
+					tail = tail->cons.cdr;
+					return eval(tail->cons.car, env);
+				}
+			}
+			if (head->symbol == intern("printf")) {
+				fprintv(stdout, 0, eval(tail->cons.car, env));
+				return head;
+			}
+			return head; /* FIXME */
+		} else {
+			fprintf(stderr, "non-symbol in calpos!\n");
+			exit(2);
+		}
+		break;
+
+	case STRING:
+		return expr;
+
+	case SYMBOL:
+		return get(env, expr);
+
+	default:
+		fprintf(stderr, "semantic error\n");
+		exit(2);
+	}
 }
 
 int
@@ -342,6 +508,7 @@ main(int argc, char **argv)
 {
 	char *src;
 	struct value *ast;
+	struct env *env;
 
 	if (argc != 2) {
 		fprintf(stderr, "USAGE: %s source.rk\n", argv[0]);
@@ -354,7 +521,8 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	ast = parse(argv[1], src);
+	env = make(struct env);
+	ast = eval(parse(argv[1], src), env);
 	if (!ast) {
 		fprintf(stderr, "%s: parsing failed.\n", argv[1]);
 		exit(1);

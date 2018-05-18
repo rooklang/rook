@@ -1,1 +1,3 @@
-(printf "hello, world\n")
+(if (eq x "hi")
+    (printf "hello, world\n")
+    (printf "goodbye, world\n"))
