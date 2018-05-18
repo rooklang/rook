@@ -12,6 +12,9 @@ struct value;
 static struct value *ROOK_TRUE;
 static struct value *ROOK_FALSE;
 
+static void
+fprintv(FILE *io, int in, struct value *v);
+
 struct cons {
 	struct value *car;
 	struct value *cdr;
@@ -150,7 +153,7 @@ new_string(const char *src)
 {
 	struct value *v;
 	char *ins, *head, *end;
-	size_t i, n;
+	size_t n;
 
 	n = strlen(src);
 	v = make(struct value);
@@ -519,6 +522,29 @@ eval(struct value *expr, struct env *env)
 		tail = expr->cons.cdr;
 
 		if (head->type == SYMBOL) {
+			if (head->symbol == intern("do")) {
+				head = ROOK_FALSE;
+				while (tail) {
+					head = eval(tail->cons.car, env);
+					tail = tail->cons.cdr;
+				}
+				return head;
+			}
+
+			if (head->symbol == intern("set")) {
+				struct value *var, *val;
+
+				var = tail->cons.car;
+				tail = tail->cons.cdr;
+				val = eval(tail->cons.car, env);
+
+				if (var->type != SYMBOL) {
+					fprintf(stderr, "non-symbol in var position of (set var val)!\n");
+					exit(1);
+				}
+				return set(env, var->symbol, val);
+			}
+
 			if (head->symbol == intern("if")) {
 				cond = eval(tail->cons.car, env);
 				tail = tail->cons.cdr;
@@ -539,14 +565,24 @@ eval(struct value *expr, struct env *env)
 				fprintf(stdout, "%s", head->string.data); /* FIXME: doesn't handle \0 embedded */
 				return ROOK_TRUE;
 			}
+
 			if (head->symbol == intern("eq")) {
 				struct value *a, *b;
 				a = eval(tail->cons.car, env);
 				tail = tail->cons.cdr;
 				b = eval(tail->cons.car, env);
+
+				if (a->type == b->type == STRING) {
+					return (a->string.len == b->string.len
+					    && memcmp(a->string.data, b->string.data, a->string.len) == 0)
+					     ? ROOK_TRUE : ROOK_FALSE;
+				}
+
 				return a == b ? ROOK_TRUE : ROOK_FALSE;
 			}
-			return head; /* FIXME */
+
+			return ROOK_FALSE;
+
 		} else {
 			fprintf(stderr, "non-symbol in calpos!\n");
 			exit(2);
@@ -574,7 +610,7 @@ init()
 
 	ROOK_FALSE = make(struct value);
 	ROOK_FALSE->type = BOOLEAN;
-	ROOK_TRUE->boolean = 0;
+	ROOK_FALSE->boolean = 0;
 }
 
 int

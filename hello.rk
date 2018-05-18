@@ -1,3 +1,5 @@
-(if (eq x "hi")
-    (printf "hello,\tworld\n")
-    (printf "goodbye,\tworld\n"))
+(do
+ (set x "hi")
+ (if (eq x "hi")
+     (printf "hello,\tworld\n")
+     (printf "goodbye,\tworld\n")))
