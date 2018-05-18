@@ -556,6 +556,20 @@ eval(struct value *expr, struct env *env)
 					return eval(tail->cons.car, env);
 				}
 			}
+
+			if (head->symbol == intern("env")) {
+				struct value *name = eval(tail->cons.car, env);
+
+				if (name->type == STRING) {
+					char *v = getenv(name->string.data);
+					return v ? new_string(v) : ROOK_FALSE;
+
+				} else {
+					fprintf(stderr, "non-string name to (env name)!\n");
+					exit(1);
+				}
+			}
+
 			if (head->symbol == intern("printf")) {
 				head = eval(tail->cons.car, env);
 				if (head->type != STRING) {

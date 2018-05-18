@@ -1,5 +1,5 @@
 (do
- (set x "hi")
+ (set x (env "HELLO"))
  (if (eq x "hi")
      (printf "hello,\tworld\n")
      (printf "goodbye,\tworld\n")))
