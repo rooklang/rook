@@ -447,11 +447,16 @@ lex(struct lexer *l)
 	struct token *tok;
 
 	/* eat whitespace */
+again:
 	for (c = peek(l); c && isspace(c); next(l), c = peek(l));
 	resync(l);
 
 	switch (c) {
 	case '\0': return NULL;
+
+	case '#':
+		for (; c != '\n'; next(l), c = peek(l));
+		goto again;
 
 	case '(': next(l); return new_token(l, T_OPENP, NULL);
 	case ')': next(l); return new_token(l, T_CLOSEP, NULL);
