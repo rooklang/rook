@@ -33,12 +33,14 @@ struct value {
 	enum {
 		CONS,
 		STRING,
+		NUMBER,
 		SYMBOL,
 		BOOLEAN,
 	} type;
 	union {
 		struct cons    cons;
 		struct string  string;
+		int            number;
 		struct symbol *symbol;
 		char           boolean;
 	};
@@ -193,6 +195,20 @@ new_string(const char *src)
 }
 
 static struct value *
+new_number(const char *src)
+{
+	struct value *v;
+
+	v = make(struct value);
+	v->type = NUMBER;
+	v->number = 0;
+	while (src && *src)
+		v->number = v->number * 10 + (*src++ - '0');
+
+	return v;
+}
+
+static struct value *
 new_symbol(const char *name)
 {
 	struct value *v;
@@ -246,12 +262,16 @@ fprintv(FILE *io, int in, struct value *v)
 		fprintf(io, "%s\"%s\"", pre, v->string.data);
 		break;
 
+	case NUMBER:
+		fprintf(io, "%s%d", pre, v->number);
+		break;
+
 	case BOOLEAN:
 		fprintf(io, "%s#%c", pre, v->boolean ? 't' : 'f');
 		break;
 
 	case SYMBOL:
-		fprintf(io, "%s:%s", pre, v->symbol->name);
+		fprintf(io, "%s'%s", pre, v->symbol->name);
 		break;
 	}
 }
@@ -292,6 +312,7 @@ enum ttype {
 	T_CLOSEP,
 	T_IDENT,
 	T_STRING,
+	T_NUMBER,
 	T_OOPS,
 };
 
@@ -437,11 +458,15 @@ lex(struct lexer *l)
 	case '"':
 		esc = 0; q = c; next(l); resync(l);
 		for (c = peek(l); c && (esc || c != q); next(l), c = peek(l));
-		tok = new_token(l, T_STRING, lexeme(l)); // fixme
+		tok = new_token(l, T_STRING, lexeme(l));
 		next(l); return tok;
 	}
+	if (c && isdigit(c)) {
+		for (c = peek(l); c && isdigit(c); next(l), c = peek(l));
+		return new_token(l, T_NUMBER, lexeme(l));
+	}
 	if (c && isalpha(c)) {
-		for (c = peek(l); c && !isspace(c); next(l), c = peek(l));
+		for (c = peek(l); c && !isspace(c) && c != ')'; next(l), c = peek(l));
 		return new_token(l, T_IDENT, lexeme(l));
 	}
 
@@ -474,6 +499,7 @@ parse(const char *file, const char *src)
 		case T_OPENP:  stack[++top] = NULL;                    break;
 		case T_IDENT:  stack[++top] = new_symbol(token->data); break;
 		case T_STRING: stack[++top] = new_string(token->data); break;
+		case T_NUMBER: stack[++top] = new_number(token->data); break;
 		case T_CLOSEP:
 			value = NULL;
 			while (top >= 0) {
@@ -503,16 +529,48 @@ truthy(struct value *cond)
 	default:      return 0; /* UNKNOWN */
 	case CONS:    return (cond->cons.car || cond->cons.cdr) ? 1 : 0;
 	case STRING:  return cond->string.len != 0              ? 1 : 0;
+	case NUMBER:  return cond->number != 0                  ? 1 : 0;
 	case SYMBOL:  return 1; /* FIXME */
 	case BOOLEAN: return cond->boolean;
+	}
+}
+
+static void
+arity(const char *msg, struct value *lst, size_t min, size_t max)
+{
+	size_t n;
+
+	n = 0;
+	while (lst) {
+		if (lst->type != CONS) {
+			fprintf(stderr, "%s: improper list!\n", msg);
+			exit(1);
+		}
+		n++;
+		lst = lst->cons.cdr;
+	}
+
+	if (min == max) {
+		if (n != min) {
+			fprintf(stderr, "%s: wrong arity (expected %li, got %li)\n", msg, min, n);
+			exit(1);
+		}
+		return;
+	}
+
+	if (n < min) {
+		fprintf(stderr, "%s: wrong arity (expected at least %li, got %li)\n", msg, min, n);
+		exit(1);
+	}
+	if (max > 0 && n > max) {
+		fprintf(stderr, "%s: wrong arity (expected no more than %li, got %li)\n", msg, max, n);
+		exit(1);
 	}
 }
 
 static struct value *
 eval(struct value *expr, struct env *env)
 {
-	/* FIXME: no environment yet... */
-
 	struct value *head, *tail, *cond;
 
 	switch (expr->type) {
@@ -533,6 +591,7 @@ eval(struct value *expr, struct env *env)
 
 			if (head->symbol == intern("set")) {
 				struct value *var, *val;
+				arity("(set ...)", tail, 2, 2);
 
 				var = tail->cons.car;
 				tail = tail->cons.cdr;
@@ -546,6 +605,7 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("if")) {
+				arity("(if ...)", tail, 2, 3);
 				cond = eval(tail->cons.car, env);
 				tail = tail->cons.cdr;
 
@@ -557,7 +617,20 @@ eval(struct value *expr, struct env *env)
 				}
 			}
 
+			if (head->symbol == intern("quote")) {
+				arity("(quote ...)", tail, 1, 1);
+				return tail->cons.car;
+			}
+
+			if (head->symbol == intern("print")) {
+				arity("(print ...)", tail, 1, 1);
+				fprintv(stderr, 0, eval(tail->cons.car, env));
+				fprintf(stderr, "\n");
+				return ROOK_TRUE;
+			}
+
 			if (head->symbol == intern("env")) {
+				arity("(env ...)", tail, 1, 1);
 				struct value *name = eval(tail->cons.car, env);
 
 				if (name->type == STRING) {
@@ -571,6 +644,7 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("printf")) {
+				arity("(printf ...)", tail, 1, 1);
 				head = eval(tail->cons.car, env);
 				if (head->type != STRING) {
 					fprintf(stderr, "non-string argument to printf!\n");
@@ -581,12 +655,13 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("eq")) {
+				arity("(eq ...)", tail, 2, 2);
 				struct value *a, *b;
 				a = eval(tail->cons.car, env);
 				tail = tail->cons.cdr;
 				b = eval(tail->cons.car, env);
 
-				if (a->type == b->type == STRING) {
+				if (a->type == b->type && b->type == STRING) {
 					return (a->string.len == b->string.len
 					    && memcmp(a->string.data, b->string.data, a->string.len) == 0)
 					     ? ROOK_TRUE : ROOK_FALSE;
@@ -604,6 +679,7 @@ eval(struct value *expr, struct env *env)
 		break;
 
 	case STRING:
+	case NUMBER:
 		return expr;
 
 	case SYMBOL:
@@ -653,8 +729,6 @@ main(int argc, char **argv)
 		fprintf(stderr, "%s: parsing failed.\n", argv[1]);
 		exit(1);
 	}
-
-	//fprintv(stdout, 0, ast);
 	free_value(ast);
 	free(src);
 	return 0;

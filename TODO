@@ -1,6 +1,4 @@
-env var support
-(quote x) form
-number support
 env scoping
 math
 test suite
+comments
