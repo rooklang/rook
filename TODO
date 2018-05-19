@@ -1,4 +1,14 @@
 env scoping
 math
 test suite
-comments
+(let ...)
+functions
+(car)
+(cdr)
+(list)
+(cons)
+(list?)
+(true?)
+(nil?)
+(string?)
+(number?)
