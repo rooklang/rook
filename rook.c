@@ -597,6 +597,7 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 #define CDR(l) ((l)->cons.cdr)
 #define CADR(l) (CAR(CDR(l)))
 #define CDAR(l) (CDR(CAR(l)))
+#define CDDR(l) (CDR(CDR(l)))
 #define CADDR(l) (CAR(CDR(CDR(l))))
 
 static struct value *
@@ -798,6 +799,38 @@ eval(struct value *expr, struct env *env)
 				/* (quote x) - return x, skipping evaluation */
 				arity("(quote ...)", tail, 1, 1);
 				return CAR(tail);
+			}
+
+			if (head->symbol == intern("let")) {
+				/* (let (x v) e) - introduce a new binding for x, setting it
+				                   to the value of evaluating v, and then evaluate
+				                   e in the newly-modified environment. */
+				struct value *lst, *var, *val;
+				arity("(let ...)", tail, 2, 0);
+
+				lst = CAR(tail);
+				while (lst) {
+					if (!CADR(lst)) {
+						fprintf(stderr, "uneven bindings list given to (let ...)\n");
+						exit(1);
+					}
+
+					var = CAR(lst);
+					if (var->type != SYMBOL) {
+						fprintf(stderr, "non-symbol in let var position!\n");
+						exit(1);
+					}
+
+					val = eval(CADR(lst), env);
+					def(env, var->symbol, eval(CADR(lst), env));
+					lst = CDDR(lst);
+				}
+				val = ROOK_FALSE;
+				for (lst = CDR(tail); lst; lst = CDR(lst)) {
+					val = eval(CAR(lst), env);
+				}
+				/* FIXME: undo damage to environment */
+				return val;
 			}
 
 			fn = eval(head, env);
