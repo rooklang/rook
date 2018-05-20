@@ -721,7 +721,7 @@ evlis(struct value *lst, struct env *env);
 static struct value *
 eval(struct value *expr, struct env *env)
 {
-	struct value *head, *tail;
+	struct value *head, *tail, *fn;
 
 	switch (expr->type) {
 	case CONS: /* (op ...) form */
@@ -770,20 +770,17 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("set")) {
-				struct value *var, *val;
 				/* (set var e) - update the environment, setting the innermost
 				                 binding of the variable var to the result of
 				                 evaluating e in the initial environment. */
 				arity("(set ...)", tail, 2, 2);
 
-				var = CAR(tail);
-				val = eval(CADR(tail), env);
-
-				if (var->type != SYMBOL) {
+				head = CAR(tail);
+				if (head->type != SYMBOL) {
 					fprintf(stderr, "non-symbol in var position of (set var val)!\n");
 					exit(1);
 				}
-				return set(env, var->symbol, val);
+				return set(env, head->symbol, eval(CADR(tail), env));
 			}
 
 			if (head->symbol == intern("if")) {
@@ -803,7 +800,6 @@ eval(struct value *expr, struct env *env)
 				return CAR(tail);
 			}
 
-			struct value *fn;
 			fn = eval(head, env);
 			if (!fn) {
 				fprintf(stderr, "warning: undefined function '%s'\n", head->symbol->name);
