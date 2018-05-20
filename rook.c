@@ -631,6 +631,7 @@ primop_eq(struct value *args)
 static struct value *
 primop_car(struct value *args)
 {
+	/* (car x) - return the first slot in cons cell x */
 	arity("(car ...)", args, 1, 1);
 	return CADR(args);
 }
@@ -638,6 +639,7 @@ primop_car(struct value *args)
 static struct value *
 primop_cdr(struct value *args)
 {
+	/* (cdr x) - return the second slot in cons cell x */
 	arity("(cdr ...)", args, 1, 1);
 	return CDAR(args);
 }
@@ -645,6 +647,7 @@ primop_cdr(struct value *args)
 static struct value *
 primop_cons(struct value *args)
 {
+	/* (cons a b) - make a new cons cell, populated with a and b */
 	arity("(cons ...)", args, 2, 2);
 	return new_cons(CAR(args), CADR(args));
 }
@@ -652,6 +655,9 @@ primop_cons(struct value *args)
 static struct value *
 primop_typeof(struct value *args)
 {
+	/* (typeof x) - return the type of value x; one of:
+	                'unknown, 'cons, 'string, 'number,
+	                'sybol, or 'boolean */
 	arity("(typeof? ...)", args, 1, 1);
 	switch (CAR(args)->type) {
 	default:      return new_symbol("unknown");
@@ -666,6 +672,7 @@ primop_typeof(struct value *args)
 static struct value *
 primop_print(struct value *args)
 {
+	/* (print e) - print the s-expr e to standard output */
 	arity("(print ...)", args, 1, 1);
 	fprintv(stderr, 0, CAR(args));
 	fprintf(stderr, "\n");
@@ -675,6 +682,7 @@ primop_print(struct value *args)
 static struct value *
 primop_env(struct value *args)
 {
+	/* (env v) - return the value of environment variable v */
 	arity("(env ...)", args, 1, 1);
 
 	if (CAR(args)->type == STRING) {
@@ -689,6 +697,12 @@ primop_env(struct value *args)
 static struct value *
 primop_printf(struct value *args)
 {
+	/* (printf "..." ...) - print a formatted string to standard output */
+	/* FIXME:
+
+	   Right now, this 'printf' implementation just prints; it doesn't f.
+	   Essentially, the format string is a DSL that we need to implement.
+	 */
 	arity("(printf ...)", args, 1, 1);
 	if (CAR(args)->type != STRING) {
 		fprintf(stderr, "non-string argument to printf!\n");
@@ -716,17 +730,12 @@ eval(struct value *expr, struct env *env)
 		if (!head) return expr;
 
 		if (head->type == SYMBOL) {
-			/* special forms
-
-			   (and x y ...)     Return #t if all arguments are true.
-			                     Halts evaluation at first false argument.
-
-			   (or x y ...)      Return #t if any argument is true.
-			                     Halts evaluation at first true argument.
-
-			 */
+			/* special forms */
 
 			if (head->symbol == intern("and")) {
+				/* (and x y ...) - evaluate each argument, in order, until a false
+				                  value is encountered; return #f when that happens
+				                  or #t otherwise. */
 				arity("(and ...)", tail, 2, 0);
 				while (tail) {
 					if (!truthy(eval(CAR(tail), env)))
@@ -737,6 +746,9 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("or")) {
+				/* (or x y ...) - evaluate each argument, in order, until a true
+				                  value is encountered; return #t when that happens
+				                  or #f otherwise. */
 				arity("(or ...)", tail, 2, 0);
 				while (tail) {
 					if (truthy(eval(CAR(tail), env)))
@@ -747,6 +759,8 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("do")) {
+				/* (do ...) - evaluate all arguments, in order, and return the
+				              value of the last, or #f if no arguments given */
 				head = ROOK_FALSE;
 				while (tail) {
 					head = eval(CAR(tail), env);
@@ -757,6 +771,9 @@ eval(struct value *expr, struct env *env)
 
 			if (head->symbol == intern("set")) {
 				struct value *var, *val;
+				/* (set var e) - update the environment, setting the innermost
+				                 binding of the variable var to the result of
+				                 evaluating e in the initial environment. */
 				arity("(set ...)", tail, 2, 2);
 
 				var = CAR(tail);
@@ -770,6 +787,9 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("if")) {
+				/* (if e x y) - evaluate e; if true, evaluate x; otherwise,
+				                evaluate y.  return the result of the chosen
+				                evaluation. */
 				arity("(if ...)", tail, 2, 3);
 
 				return truthy(eval(CAR(tail), env))
@@ -778,6 +798,7 @@ eval(struct value *expr, struct env *env)
 			}
 
 			if (head->symbol == intern("quote")) {
+				/* (quote x) - return x, skipping evaluation */
 				arity("(quote ...)", tail, 1, 1);
 				return CAR(tail);
 			}
