@@ -889,6 +889,14 @@ init(struct env *env)
 	set(env, intern("print"),  new_primop(primop_print));
 	set(env, intern("env"),    new_primop(primop_env));
 	set(env, intern("printf"), new_primop(primop_printf));
+
+	set(env, intern("and"),    new_symbol("and"));
+	set(env, intern("or"),     new_symbol("or"));
+	set(env, intern("do"),     new_symbol("do"));
+	set(env, intern("set"),    new_symbol("set"));
+	set(env, intern("if"),     new_symbol("if"));
+	set(env, intern("quote"),  new_symbol("quote"));
+	set(env, intern("let"),    new_symbol("let"));
 }
 
 int
