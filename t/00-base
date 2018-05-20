@@ -10,6 +10,18 @@
 ---
 #f
 ============
+quoted symbols should evaluate to themselves
+---
+(quote something)
+---
+'something
+============
+single quote aliasing ('x) should behave like (quote x)
+---
+'something
+---
+'something
+============
 (eq?) should work with numbers
 ---
 (eq? 1 1)
@@ -34,8 +46,21 @@
 ---
 #f
 ============
-printf should work with a single string argument
+(do) should return the value of its only body form
 ---
-(printf "hello, world!\n")
+(do 1)
 ---
-#t
+1
+============
+(do) should return the value of its last body form, if given 2 body forms
+---
+(do 1 2)
+---
+2
+============
+(do) should return the value of its last body form, if given 3 body forms
+---
+(do 1 2 3)
+---
+3
+============

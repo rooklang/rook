@@ -402,6 +402,7 @@ slurp(const char *file)
 enum ttype {
 	T_OPENP,
 	T_CLOSEP,
+	T_QUOTE,
 	T_IDENT,
 	T_STRING,
 	T_NUMBER,
@@ -552,6 +553,8 @@ again:
 		for (; c != '\n'; next(l), c = peek(l));
 		goto again;
 
+	case '\'': next(l); return new_token(l, T_QUOTE, NULL);
+
 	case '#':
 		next(l);
 		switch (peek(l)) {
@@ -589,6 +592,7 @@ parse(const char *file, const char *src)
 	struct lexer l;
 	struct token *token;
 	struct value *value, **stack;
+	struct value *ROOK_QUOTE = (void *)(0x01);
 	int top;
 
 	l.src = src;
@@ -608,13 +612,21 @@ parse(const char *file, const char *src)
 		case T_IDENT:  stack[++top] = new_symbol(token->data); break;
 		case T_STRING: stack[++top] = new_string(token->data); break;
 		case T_NUMBER: stack[++top] = new_number(token->data); break;
+		case T_QUOTE:  stack[++top] = ROOK_QUOTE; break;
 		case T_TRUE:   stack[++top] = ROOK_TRUE;  break;
 		case T_FALSE:  stack[++top] = ROOK_FALSE; break;
 		case T_CLOSEP:
 			value = NULL;
 			while (top >= 0) {
 				if (!stack[top]) { /* NULL is the '(' marker */
-					stack[top] = value ? value : new_cons(NULL, NULL);
+					if (!value)
+						value = new_cons(NULL, NULL);
+
+					if (top > 0 && stack[top-1] == ROOK_QUOTE) {
+						top--;
+						value = new_cons(new_symbol("quote"), value);
+					}
+					stack[top] = value;
 					break;
 				}
 				value = new_cons(stack[top--], value);
@@ -629,6 +641,11 @@ parse(const char *file, const char *src)
 		free_token(token);
 	}
 
+	if (stack[0] == ROOK_QUOTE) {
+		return new_cons(
+			new_symbol("quote"),
+			new_cons(stack[1], NULL));
+	}
 	return stack[0];
 }
 
