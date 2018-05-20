@@ -1,0 +1,62 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use File::Temp qw/tempfile/;
+
+my $rc = 0;
+my ($tmp_fh, $tmp_file) = tempfile;
+
+sub test {
+  my ($f, @src) = @_;
+  @src == 3 or die "$f: malformed test case file\n";
+  my ($test, $src, $want) = @src;
+  chomp($test);
+
+  open my $pipe, "|-", "./rook --evaluate --quiet - >$tmp_file"
+    or die "$f: failed to exec ./rook: $!\n";
+  print $pipe $src;
+  close $pipe
+    or die "$f: ./rook failed: $!\n";
+
+  seek $tmp_fh, 0, 0;
+  my $got = do { local $/; <$tmp_fh>; };
+
+  if ($got eq $want) {
+    print "OK $test\n";
+
+  } else {
+    print "FAIL $test\n";
+
+    open $pipe, "|-", "diff -y - $tmp_file >&2"
+      or die "$f: unable to generate diff: $!\n";
+    print $pipe "$want";
+    close $pipe;
+    $rc = 1;
+  }
+
+}
+
+for my $f (@ARGV) {
+  my ($i, @src) = (0);
+
+  open my $fh, "<", $f
+    or die "unable to open $f: $!\n";
+  while (<$fh>) {
+    if (m/^---+/) { $i++; next; }
+    if (m/^===+/) {
+      test($f, @src);
+      @src = (); $i = 0;
+      next;
+    }
+    $src[$i] .= $_;
+  }
+  test($f, @src) if $i;
+  close $fh;
+}
+
+if ($rc == 0) {
+  print "\nALL TESTS PASSED\n";
+  exit 0;
+}
+print "\nSOME TESTS FAILED!!\n";
+exit $rc;

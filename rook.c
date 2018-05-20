@@ -7,6 +7,10 @@
 #include <fcntl.h>
 #include <ctype.h>
 
+#include <getopt.h>
+
+static int QUIET = 0;
+
 struct value;
 
 static struct value *ROOK_TRUE;
@@ -327,6 +331,40 @@ fprintv(FILE *io, int in, struct value *v)
 	case LAMBDA:
 		fprintf(io, "%s<lambda:%p>", pre, (void *)v);
 		break;
+	}
+}
+
+static char *
+slurpfd(int fd)
+{
+	ssize_t n, len, nread;
+	char *src, *p, *re;
+
+	n = len = 8191;
+	p = src = mems(len+1, char);
+	for (;;) {
+		if (n == 0) {
+			n = 8192; len += n;
+			re = realloc(src, len+1);
+			if (!re) {
+				fprintf(stderr, "*** realloc failed ***\n");
+				exit(1);
+			}
+			p = re + (p - src);
+			src = re;
+			memset(p, 0, n+1);
+		}
+		while ((nread = read(fd, p, n)) > 0) {
+			p += nread;
+			n -= nread;
+		}
+		if (nread < 0) {
+			free(src);
+			return NULL;
+		}
+		if (nread == 0) {
+			return src;
+		}
 	}
 }
 
@@ -675,12 +713,15 @@ primop_eq(struct value *args)
 	a = CAR(args);
 	b = CADR(args);
 
-	if (a->type == b->type && b->type == STRING) {
-		return truish(a->string.len == b->string.len
-		           && memcmp(a->string.data, b->string.data, a->string.len) == 0);
-	}
+	if (a->type != b->type)
+		return truish(0);
 
-	return truish(a == b);
+	switch (a->type) {
+	default:     return truish(a == b);
+	case NUMBER: return truish(a->number == b->number);
+	case STRING: return truish(a->string.len == b->string.len
+	                        && memcmp(a->string.data, b->string.data, a->string.len) == 0);
+	}
 }
 
 static struct value *
@@ -729,8 +770,10 @@ primop_print(struct value *args)
 {
 	/* (print e) - print the s-expr e to standard output */
 	arity("(print ...)", args, 1, 1);
-	fprintv(stderr, 0, CAR(args));
-	fprintf(stderr, "\n");
+	if (!QUIET) {
+		fprintv(stderr, 0, CAR(args));
+		fprintf(stderr, "\n");
+	}
 	return ROOK_TRUE;
 }
 
@@ -763,7 +806,9 @@ primop_printf(struct value *args)
 		fprintf(stderr, "non-string argument to printf!\n");
 		exit(2);
 	}
-	fprintf(stdout, "%s", CAR(args)->string.data); /* FIXME: doesn't handle \0 embedded */
+	if (!QUIET) {
+		fprintf(stdout, "%s", CAR(args)->string.data); /* FIXME: doesn't handle \0 embedded */
+	}
 	return ROOK_TRUE;
 }
 
@@ -1003,24 +1048,68 @@ main(int argc, char **argv)
 	struct value *ast;
 	struct env *env;
 
-	if (argc != 2) {
-		fprintf(stderr, "USAGE: %s source.rk\n", argv[0]);
+	struct {
+		int evaluate;
+		int quiet;
+	} opts;
+
+	memset(&opts, 0, sizeof(opts));
+
+	for (;;) {
+		int c, idx;
+		static struct option longs[] = {
+			{ "quiet",    no_argument, 0, 'q' },
+			{ "evaluate", no_argument, 0, 'E' },
+			{ 0,          0,           0,  0  }
+		};
+
+		c = getopt_long(argc, argv, "qE", longs, &idx);
+		if (c < 0) break;
+		switch (c) {
+		case 'q':
+			opts.quiet = 1;
+			break;
+
+		case 'E':
+			opts.evaluate = 1;
+			break;
+
+		default:
+			fprintf(stderr, "USAGE: %s [--evaluate] [--quiet] code.rk\n", argv[0]);
+			exit(1);
+		}
+	}
+
+	if (argc - optind != 1) {
+		fprintf(stderr, "USAGE: %s [--evaluate] [--quiet] code.rk\n", argv[0]);
 		exit(1);
 	}
 
-	src = slurp(argv[1]);
-	if (!src) {
-		fprintf(stderr, "%s: %s (error %d)\n", argv[1], strerror(errno), errno);
-		exit(1);
+	if (strcmp(argv[optind], "-") == 0) {
+		src = slurpfd(0);
+	} else {
+		src = slurp(argv[optind]);
+		if (!src) {
+			fprintf(stderr, "%s: %s (error %d)\n", argv[optind], strerror(errno), errno);
+			exit(1);
+		}
 	}
+
+	QUIET = opts.quiet;
 
 	env = make(struct env);
 	init(env);
-	ast = eval(parse(argv[1], src), env);
+	ast = eval(parse(argv[optind], src), env);
 	if (!ast) {
-		fprintf(stderr, "%s: parsing failed.\n", argv[1]);
+		fprintf(stderr, "%s: parsing failed.\n", argv[optind]);
 		exit(1);
 	}
+
+	if (opts.evaluate) {
+		fprintv(stdout, 0, ast);
+		fprintf(stdout, "\n");
+	}
+
 	free_value(ast);
 	free(src);
 	return 0;

@@ -1,0 +1,29 @@
+(eq?) should work with numbers
+---
+(eq? 1 1)
+---
+#t
+============
+(eq?) should handle inequality with numbers
+---
+(eq? 1 2)
+---
+#f
+============
+(eq?) should work with strings
+---
+(eq? "a" "a")
+---
+#t
+============
+(eq?) should handle inequality with strings
+---
+(eq? "a" "b")
+---
+#f
+============
+printf should work with a single string argument
+---
+(printf "hello, world!\n")
+---
+#t
