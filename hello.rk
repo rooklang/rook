@@ -1,9 +1,9 @@
-# example rook program
+; example rook program
 (do
  (set x (env "HELLO"))
  (set n 42)
- (if (eq x "hi")
+ (if (eq? x "hi")
      (printf "hello,\tworld\n")
      (printf "goodbye,\tworld\n"))
- #(print n)
+ ;(print n)
  (print (quote (x y z))))

@@ -3,12 +3,5 @@ math
 test suite
 (let ...)
 functions
-(car)
-(cdr)
 (list)
-(cons)
-(list?)
-(true?)
 (nil?)
-(string?)
-(number?)

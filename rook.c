@@ -29,6 +29,8 @@ struct symbol {
 	char *name;
 };
 
+typedef struct value * (*primop)(struct value *);
+
 struct value {
 	enum {
 		CONS,
@@ -36,6 +38,7 @@ struct value {
 		NUMBER,
 		SYMBOL,
 		BOOLEAN,
+		PRIMOP,
 	} type;
 	union {
 		struct cons    cons;
@@ -43,6 +46,7 @@ struct value {
 		int            number;
 		struct symbol *symbol;
 		char           boolean;
+		primop         primop;
 	};
 };
 
@@ -147,6 +151,17 @@ new_cons(struct value *car, struct value *cdr)
 	v->type = CONS;
 	v->cons.car = car;
 	v->cons.cdr = cdr;
+	return v;
+}
+
+static struct value *
+new_primop(primop op)
+{
+	struct value *v;
+
+	v = make(struct value);
+	v->type = PRIMOP;
+	v->primop = op;
 	return v;
 }
 
@@ -256,6 +271,10 @@ fprintv(FILE *io, int in, struct value *v)
 			fprintv(io, in+6, v->cons.cdr);
 		}
 		fprintf(io, ")");
+		break;
+
+	case PRIMOP:
+		fprintf(io, "%s<op:%p>", pre, (unsigned char *)&(v->primop));
 		break;
 
 	case STRING:
@@ -454,7 +473,7 @@ again:
 	switch (c) {
 	case '\0': return NULL;
 
-	case '#':
+	case ';':
 		for (; c != '\n'; next(l), c = peek(l));
 		goto again;
 
@@ -470,7 +489,7 @@ again:
 		for (c = peek(l); c && isdigit(c); next(l), c = peek(l));
 		return new_token(l, T_NUMBER, lexeme(l));
 	}
-	if (c && isalpha(c)) {
+	if (c) {
 		for (c = peek(l); c && !isspace(c) && c != ')'; next(l), c = peek(l));
 		return new_token(l, T_IDENT, lexeme(l));
 	}
@@ -573,23 +592,165 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 	}
 }
 
+#define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
+#define CAR(l) ((l)->cons.car)
+#define CDR(l) ((l)->cons.cdr)
+#define CADR(l) (CAR(CDR(l)))
+#define CDAR(l) (CDR(CAR(l)))
+#define CADDR(l) (CAR(CDR(CDR(l))))
+
+static struct value *
+primop_atom(struct value *args)
+{
+	/* (atom? a) - return #t if a is not a cons cell */
+
+	arity("(atom? ...)", args, 1, 1);
+	return truish(CAR(args)->type == CONS);
+}
+
+static struct value *
+primop_eq(struct value *args)
+{
+	/* (eq? a b) - return true if a and b are both atoms,
+	               and are equal to one another */
+
+	struct value *a, *b;
+
+	arity("(eq? ...)", args, 2, 2);
+	a = CAR(args);
+	b = CADR(args);
+
+	if (a->type == b->type && b->type == STRING) {
+		return truish(a->string.len == b->string.len
+		           && memcmp(a->string.data, b->string.data, a->string.len) == 0);
+	}
+
+	return truish(a == b);
+}
+
+static struct value *
+primop_car(struct value *args)
+{
+	arity("(car ...)", args, 1, 1);
+	return CADR(args);
+}
+
+static struct value *
+primop_cdr(struct value *args)
+{
+	arity("(cdr ...)", args, 1, 1);
+	return CDAR(args);
+}
+
+static struct value *
+primop_cons(struct value *args)
+{
+	arity("(cons ...)", args, 2, 2);
+	return new_cons(CAR(args), CADR(args));
+}
+
+static struct value *
+primop_typeof(struct value *args)
+{
+	arity("(typeof? ...)", args, 1, 1);
+	switch (CAR(args)->type) {
+	default:      return new_symbol("unknown");
+	case CONS:    return new_symbol("cons");
+	case STRING:  return new_symbol("string");
+	case NUMBER:  return new_symbol("number");
+	case SYMBOL:  return new_symbol("symbol");
+	case BOOLEAN: return new_symbol("boolean");
+	}
+}
+
+static struct value *
+primop_print(struct value *args)
+{
+	arity("(print ...)", args, 1, 1);
+	fprintv(stderr, 0, CAR(args));
+	fprintf(stderr, "\n");
+	return ROOK_TRUE;
+}
+
+static struct value *
+primop_env(struct value *args)
+{
+	arity("(env ...)", args, 1, 1);
+
+	if (CAR(args)->type == STRING) {
+		char *v = getenv(CAR(args)->string.data);
+		return v ? new_string(v) : ROOK_FALSE;
+	}
+
+	fprintf(stderr, "non-string name to (env name)!\n");
+	exit(1);
+}
+
+static struct value *
+primop_printf(struct value *args)
+{
+	arity("(printf ...)", args, 1, 1);
+	if (CAR(args)->type != STRING) {
+		fprintf(stderr, "non-string argument to printf!\n");
+		exit(2);
+	}
+	fprintf(stdout, "%s", CAR(args)->string.data); /* FIXME: doesn't handle \0 embedded */
+	return ROOK_TRUE;
+}
+
+static struct value *
+eval(struct value *expr, struct env *env);
+
+static struct value *
+evlis(struct value *lst, struct env *env);
+
 static struct value *
 eval(struct value *expr, struct env *env)
 {
-	struct value *head, *tail, *cond;
+	struct value *head, *tail;
 
 	switch (expr->type) {
 	case CONS: /* (op ...) form */
-		head = expr->cons.car;
+		head = CAR(expr);
+		tail = CDR(expr);
 		if (!head) return expr;
-		tail = expr->cons.cdr;
 
 		if (head->type == SYMBOL) {
+			/* special forms
+
+			   (and x y ...)     Return #t if all arguments are true.
+			                     Halts evaluation at first false argument.
+
+			   (or x y ...)      Return #t if any argument is true.
+			                     Halts evaluation at first true argument.
+
+			 */
+
+			if (head->symbol == intern("and")) {
+				arity("(and ...)", tail, 2, 0);
+				while (tail) {
+					if (!truthy(eval(CAR(tail), env)))
+						return ROOK_FALSE;
+					tail = CDR(tail);
+				}
+				return ROOK_TRUE;
+			}
+
+			if (head->symbol == intern("or")) {
+				arity("(or ...)", tail, 2, 0);
+				while (tail) {
+					if (truthy(eval(CAR(tail), env)))
+						return ROOK_TRUE;
+					tail = CDR(tail);
+				}
+				return ROOK_FALSE;
+			}
+
 			if (head->symbol == intern("do")) {
 				head = ROOK_FALSE;
 				while (tail) {
-					head = eval(tail->cons.car, env);
-					tail = tail->cons.cdr;
+					head = eval(CAR(tail), env);
+					tail = CDR(tail);
 				}
 				return head;
 			}
@@ -598,9 +759,8 @@ eval(struct value *expr, struct env *env)
 				struct value *var, *val;
 				arity("(set ...)", tail, 2, 2);
 
-				var = tail->cons.car;
-				tail = tail->cons.cdr;
-				val = eval(tail->cons.car, env);
+				var = CAR(tail);
+				val = eval(CADR(tail), env);
 
 				if (var->type != SYMBOL) {
 					fprintf(stderr, "non-symbol in var position of (set var val)!\n");
@@ -611,78 +771,33 @@ eval(struct value *expr, struct env *env)
 
 			if (head->symbol == intern("if")) {
 				arity("(if ...)", tail, 2, 3);
-				cond = eval(tail->cons.car, env);
-				tail = tail->cons.cdr;
 
-				if (truthy(cond)) {
-					return eval(tail->cons.car, env);
-				} else {
-					tail = tail->cons.cdr;
-					return eval(tail->cons.car, env);
-				}
+				return truthy(eval(CAR(tail), env))
+				     ? eval(CADR(tail), env)
+				     : eval(CADDR(tail), env);
 			}
 
 			if (head->symbol == intern("quote")) {
 				arity("(quote ...)", tail, 1, 1);
-				return tail->cons.car;
+				return CAR(tail);
 			}
 
-			if (head->symbol == intern("print")) {
-				arity("(print ...)", tail, 1, 1);
-				fprintv(stderr, 0, eval(tail->cons.car, env));
-				fprintf(stderr, "\n");
-				return ROOK_TRUE;
+			struct value *fn;
+			fn = eval(head, env);
+			if (!fn) {
+				fprintf(stderr, "warning: undefined function '%s'\n", head->symbol->name);
+				exit(1);
 			}
 
-			if (head->symbol == intern("env")) {
-				arity("(env ...)", tail, 1, 1);
-				struct value *name = eval(tail->cons.car, env);
-
-				if (name->type == STRING) {
-					char *v = getenv(name->string.data);
-					return v ? new_string(v) : ROOK_FALSE;
-
-				} else {
-					fprintf(stderr, "non-string name to (env name)!\n");
-					exit(1);
-				}
+			if (fn->type == PRIMOP) {
+				return fn->primop(evlis(tail, env));
 			}
-
-			if (head->symbol == intern("printf")) {
-				arity("(printf ...)", tail, 1, 1);
-				head = eval(tail->cons.car, env);
-				if (head->type != STRING) {
-					fprintf(stderr, "non-string argument to printf!\n");
-					exit(2);
-				}
-				fprintf(stdout, "%s", head->string.data); /* FIXME: doesn't handle \0 embedded */
-				return ROOK_TRUE;
-			}
-
-			if (head->symbol == intern("eq")) {
-				arity("(eq ...)", tail, 2, 2);
-				struct value *a, *b;
-				a = eval(tail->cons.car, env);
-				tail = tail->cons.cdr;
-				b = eval(tail->cons.car, env);
-
-				if (a->type == b->type && b->type == STRING) {
-					return (a->string.len == b->string.len
-					    && memcmp(a->string.data, b->string.data, a->string.len) == 0)
-					     ? ROOK_TRUE : ROOK_FALSE;
-				}
-
-				return a == b ? ROOK_TRUE : ROOK_FALSE;
-			}
-
-			return ROOK_FALSE;
-
-		} else {
-			fprintf(stderr, "non-symbol in calpos!\n");
-			exit(2);
 		}
-		break;
 
+		fprintf(stderr, "non-symbol in calpos!\n");
+		exit(2);
+
+	case PRIMOP:
 	case STRING:
 	case NUMBER:
 		return expr;
@@ -696,8 +811,16 @@ eval(struct value *expr, struct env *env)
 	}
 }
 
+static struct value *
+evlis(struct value *lst, struct env *env)
+{
+	if (!lst) return NULL;
+	return new_cons(eval(CAR(lst), env),
+	                evlis(CDR(lst), env));
+}
+
 static void
-init()
+init(struct env *env)
 {
 	ROOK_TRUE = make(struct value);
 	ROOK_TRUE->type = BOOLEAN;
@@ -706,6 +829,16 @@ init()
 	ROOK_FALSE = make(struct value);
 	ROOK_FALSE->type = BOOLEAN;
 	ROOK_FALSE->boolean = 0;
+
+	set(env, intern("atom?"),  new_primop(primop_atom));
+	set(env, intern("eq?"),    new_primop(primop_eq));
+	set(env, intern("car"),    new_primop(primop_car));
+	set(env, intern("cdr"),    new_primop(primop_cdr));
+	set(env, intern("cons"),   new_primop(primop_cons));
+	set(env, intern("typeof"), new_primop(primop_typeof));
+	set(env, intern("print"),  new_primop(primop_print));
+	set(env, intern("env"),    new_primop(primop_env));
+	set(env, intern("printf"), new_primop(primop_printf));
 }
 
 int
@@ -720,8 +853,6 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
-	init();
-
 	src = slurp(argv[1]);
 	if (!src) {
 		fprintf(stderr, "%s: %s (error %d)\n", argv[1], strerror(errno), errno);
@@ -729,6 +860,7 @@ main(int argc, char **argv)
 	}
 
 	env = make(struct env);
+	init(env);
 	ast = eval(parse(argv[1], src), env);
 	if (!ast) {
 		fprintf(stderr, "%s: parsing failed.\n", argv[1]);
