@@ -1,3 +1,15 @@
+#t should evaluate to itself
+---
+#t
+---
+#t
+============
+#f should evaluate to itself
+---
+#f
+---
+#f
+============
 (eq?) should work with numbers
 ---
 (eq? 1 1)

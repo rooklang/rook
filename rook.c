@@ -405,6 +405,8 @@ enum ttype {
 	T_IDENT,
 	T_STRING,
 	T_NUMBER,
+	T_TRUE,
+	T_FALSE,
 	T_OOPS,
 };
 
@@ -550,6 +552,15 @@ again:
 		for (; c != '\n'; next(l), c = peek(l));
 		goto again;
 
+	case '#':
+		next(l);
+		switch (peek(l)) {
+		case 't': next(l); return new_token(l, T_TRUE,  NULL);
+		case 'f': next(l); return new_token(l, T_FALSE, NULL);
+		default:
+			return new_token(l, T_OOPS, "invalid '#' macro");
+		}
+
 	case '(': next(l); return new_token(l, T_OPENP, NULL);
 	case ')': next(l); return new_token(l, T_CLOSEP, NULL);
 	case '"':
@@ -597,6 +608,8 @@ parse(const char *file, const char *src)
 		case T_IDENT:  stack[++top] = new_symbol(token->data); break;
 		case T_STRING: stack[++top] = new_string(token->data); break;
 		case T_NUMBER: stack[++top] = new_number(token->data); break;
+		case T_TRUE:   stack[++top] = ROOK_TRUE;  break;
+		case T_FALSE:  stack[++top] = ROOK_FALSE; break;
 		case T_CLOSEP:
 			value = NULL;
 			while (top >= 0) {
@@ -650,6 +663,15 @@ len(struct value *lst)
 	return n;
 }
 
+#define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
+#define CAR(l) ((l)->cons.car)
+#define CDR(l) ((l)->cons.cdr)
+#define CAAR(l) (CAR(CAR(l)))
+#define CADR(l) (CAR(CDR(l)))
+#define CDAR(l) (CDR(CAR(l)))
+#define CDDR(l) (CDR(CDR(l)))
+#define CADDR(l) (CAR(CDR(CDR(l))))
+
 static void
 arity(const char *msg, struct value *lst, size_t min, size_t max)
 {
@@ -662,7 +684,7 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 			exit(1);
 		}
 		n++;
-		lst = lst->cons.cdr;
+		lst = CDR(lst);
 	}
 
 	if (min == max) {
@@ -679,18 +701,11 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 	}
 	if (max > 0 && n > max) {
 		fprintf(stderr, "%s: wrong arity (expected no more than %li, got %li)\n", msg, max, n);
+		fprintv(stderr, 2, lst);
+		fprintf(stderr, "\n");
 		exit(1);
 	}
 }
-
-#define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
-#define CAR(l) ((l)->cons.car)
-#define CDR(l) ((l)->cons.cdr)
-#define CAAR(l) (CAR(CAR(l)))
-#define CADR(l) (CAR(CDR(l)))
-#define CDAR(l) (CDR(CAR(l)))
-#define CDDR(l) (CDR(CDR(l)))
-#define CADDR(l) (CAR(CDR(CDR(l))))
 
 static struct value *
 primop_atom(struct value *args)
@@ -988,6 +1003,7 @@ eval(struct value *expr, struct env *env)
 		fprintf(stderr, "non-symbol in calling position!\n");
 		exit(2);
 
+	case BOOLEAN:
 	case LAMBDA:
 	case PRIMOP:
 	case STRING:
