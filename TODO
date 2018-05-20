@@ -1,7 +1,7 @@
 env scoping
 math
 test suite
-(let ...)
 functions
+lambda
 (list)
 (nil?)
