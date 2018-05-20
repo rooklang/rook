@@ -2,6 +2,5 @@ env scoping
 math
 test suite
 functions
-lambda
 (list)
 (nil?)

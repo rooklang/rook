@@ -11,4 +11,5 @@
      (printf "hello,\tworld\n")
      (printf "goodbye,\tworld\n"))
  ;(print n)
+ ((lambda (m) (printf m)) "labmda!\n")
  (print (quote (x y z))))

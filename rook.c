@@ -29,6 +29,11 @@ struct symbol {
 	char *name;
 };
 
+struct lambda {
+	struct value *formals;
+	struct value *body;
+};
+
 typedef struct value * (*primop)(struct value *);
 
 struct value {
@@ -39,6 +44,7 @@ struct value {
 		SYMBOL,
 		BOOLEAN,
 		PRIMOP,
+		LAMBDA,
 	} type;
 	union {
 		struct cons    cons;
@@ -47,6 +53,7 @@ struct value {
 		struct symbol *symbol;
 		char           boolean;
 		primop         primop;
+		struct lambda  lambda;
 	};
 };
 
@@ -234,6 +241,18 @@ new_symbol(const char *name)
 	return v;
 }
 
+static struct value *
+new_lambda(struct value *formals, struct value *body)
+{
+	struct value *v;
+
+	v = make(struct value);
+	v->type = LAMBDA;
+	v->lambda.formals = formals;
+	v->lambda.body    = body;
+	return v;
+}
+
 static void
 free_value(struct value *v)
 {
@@ -252,6 +271,11 @@ free_value(struct value *v)
 	case SYMBOL:
 		free(v->symbol->name);
 		free(v->symbol);
+		break;
+
+	case LAMBDA:
+		free_value(v->lambda.formals);
+		free_value(v->lambda.body);
 		break;
 
 	default: /* noop */
@@ -298,6 +322,10 @@ fprintv(FILE *io, int in, struct value *v)
 
 	case SYMBOL:
 		fprintf(io, "%s'%s", pre, v->symbol->name);
+		break;
+
+	case LAMBDA:
+		fprintf(io, "%s<lambda:%p>", pre, (void *)v);
 		break;
 	}
 }
@@ -566,6 +594,24 @@ truthy(struct value *cond)
 	}
 }
 
+static size_t
+len(struct value *lst)
+{
+	size_t n;
+
+	n = 0;
+	while (lst) {
+		if (lst->type != CONS) {
+			fprintf(stderr, "len(): improper list!\n");
+			exit(1);
+		}
+		n++;
+		lst = lst->cons.cdr;
+	}
+
+	return n;
+}
+
 static void
 arity(const char *msg, struct value *lst, size_t min, size_t max)
 {
@@ -602,6 +648,7 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 #define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
 #define CAR(l) ((l)->cons.car)
 #define CDR(l) ((l)->cons.cdr)
+#define CAAR(l) (CAR(CAR(l)))
 #define CADR(l) (CAR(CDR(l)))
 #define CDAR(l) (CDR(CAR(l)))
 #define CDDR(l) (CDR(CDR(l)))
@@ -729,7 +776,7 @@ evlis(struct value *lst, struct env *env);
 static struct value *
 eval(struct value *expr, struct env *env)
 {
-	struct value *head, *tail, *fn;
+	struct value *head, *tail, *fn, *values, *formals;
 
 	switch (expr->type) {
 	case CONS: /* (op ...) form */
@@ -840,6 +887,26 @@ eval(struct value *expr, struct env *env)
 				return val;
 			}
 
+			if (head->symbol == intern("lambda")) {
+				/* (lambda (args ...) body) - create a new anonymous function. */
+				arity("(lambda ...)", tail, 2, 0);
+				if (CAR(tail)->type != CONS) {
+					fprintf(stderr, "non-list lambda formals spec!\n");
+					exit(1);
+				}
+				for (head = CAAR(tail); head; head = CDR(head)) {
+					if (head->type != SYMBOL) {
+						fprintf(stderr, "non-symbol in lambda formals list!\n");
+						exit(1);
+					}
+				}
+
+				return new_lambda(CAR(tail),
+					new_cons(
+						new_symbol("do"),
+						CDR(tail)));
+			}
+
 			fn = eval(head, env);
 			if (!fn) {
 				fprintf(stderr, "warning: undefined function '%s'\n", head->symbol->name);
@@ -849,11 +916,34 @@ eval(struct value *expr, struct env *env)
 			if (fn->type == PRIMOP) {
 				return fn->primop(evlis(tail, env));
 			}
+
+			fprintf(stderr, "invalid form!\n");
+			exit(1);
 		}
 
-		fprintf(stderr, "non-symbol in calpos!\n");
+		head = eval(head, env);
+		if (head->type == LAMBDA) {
+			values  = evlis(tail, env);
+			formals = head->lambda.formals;
+
+			if (len(values) != len(formals)) {
+				fprintf(stderr, "invalid arity for lambda call!\n");
+				exit(1);
+			}
+
+			while (values) {
+				def(env, CAR(formals)->symbol, CAR(values));
+				values  = CDR(values);
+				formals = CDR(formals);
+			}
+			/* FIXME: undo damage to environment */
+			return eval(head->lambda.body, env);
+		}
+
+		fprintf(stderr, "non-symbol in calling position!\n");
 		exit(2);
 
+	case LAMBDA:
 	case PRIMOP:
 	case STRING:
 	case NUMBER:
