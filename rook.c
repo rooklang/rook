@@ -237,7 +237,14 @@ new_symbol(const char *name)
 static void
 free_value(struct value *v)
 {
+	if (!v) return;
+
 	switch (v->type) {
+	case CONS:
+		free_value(v->cons.car);
+		free_value(v->cons.cdr);
+		break;
+
 	case STRING:
 		free(v->string.data);
 		break;
