@@ -687,7 +687,7 @@ primop_env(struct value *args)
 
 	if (CAR(args)->type == STRING) {
 		char *v = getenv(CAR(args)->string.data);
-		return v ? new_string(v) : ROOK_FALSE;
+		return new_string(v ? v : "");
 	}
 
 	fprintf(stderr, "non-string name to (env name)!\n");
