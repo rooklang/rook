@@ -1041,6 +1041,109 @@ init(struct env *env)
 	set(env, intern("let"),    new_symbol("let"));
 }
 
+static int
+balanced(const char *src)
+{
+	const char *p;
+	int open, quote, esc;
+
+	quote = esc = 0;
+	open = 0;
+	for (p = src; *p; p++) {
+		if (quote) {
+			if (!esc) {
+				if (*p == '"') {
+					quote = 0;
+
+				} else if (*p == '\\') {
+					esc = 1;
+				}
+
+			} else {
+				esc = 0;
+			}
+
+		} else if (*p == '"') {
+			quote = 1;
+
+		} else if (*p == '(') {
+			open++;
+
+		} else  if (*p == ')') {
+			open--;
+		}
+	}
+	return open == 0;
+}
+
+static void
+repl(struct env *env)
+{
+	char *p, *src, *re;
+	size_t n, nread, len;
+	struct value *ast;
+	int done;
+
+	if (isatty(1)) {
+		fprintf(stdout, "\033[1;32mrook\033[0m \033[1;31mpre-alpha\033[0m v0.0.0.0.0\n");
+		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
+		fprintf(stdout, "---\n");
+		fprintf(stdout, "\033[1;36m♜\033[0m  ");
+	} else {
+		fprintf(stdout, "rook pre-alpha v0.0.0.0.0\n");
+		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
+		fprintf(stdout, "---\n");
+		fprintf(stdout, "♜  ");
+	}
+	fflush(stdout);
+
+	done = 0;
+	n = 0;
+	len = 8192;
+	p = src = mems(len, char);
+	while (!done) {
+		if (n == len) {
+			len += 8192;
+			re = realloc(src, len);
+			if (!re) {
+				fprintf(stderr, "*** realloc failed! ***\n");
+				exit(1);
+			}
+			src = re;
+		}
+		nread = read(0, p, len - n);
+		if (nread < 0) {
+			fprintf(stderr, "error reading stdin: %s (error %d)\n", strerror(errno), errno);
+			exit(1);
+		}
+		if (nread == 0) {
+			done = 1;
+		}
+		n += nread;
+		p += nread;
+		src[n] = '\0';
+
+		if (balanced(src)) {
+			ast = parse("<stdin>", src);
+			if (!ast) {
+				fprintf(stderr, "!!! parse error!\n");
+
+			} else {
+				fprintv(stdout, 0, eval(ast, env));
+				n = 0;
+				p = src;
+				if (isatty(1)) {
+					fprintf(stdout, "\n\033[1;36m♜\033[0m  ");
+				} else {
+					fprintf(stdout, "\n♜  ");
+				}
+				fflush(stdout);
+				continue;
+			}
+		}
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1080,9 +1183,13 @@ main(int argc, char **argv)
 		}
 	}
 
+	QUIET = opts.quiet;
+	env = make(struct env);
+	init(env);
+
 	if (argc - optind != 1) {
-		fprintf(stderr, "USAGE: %s [--evaluate] [--quiet] code.rk\n", argv[0]);
-		exit(1);
+		repl(env);
+		exit(0);
 	}
 
 	if (strcmp(argv[optind], "-") == 0) {
@@ -1095,10 +1202,6 @@ main(int argc, char **argv)
 		}
 	}
 
-	QUIET = opts.quiet;
-
-	env = make(struct env);
-	init(env);
 	ast = eval(parse(argv[optind], src), env);
 	if (!ast) {
 		fprintf(stderr, "%s: parsing failed.\n", argv[optind]);
