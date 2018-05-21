@@ -21,3 +21,5 @@ clean:
 	rm -f lcov.info rook *.o
 
 rook: rook.o
+
+.PHONY: demo test cover coverage copycov clean

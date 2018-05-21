@@ -79,8 +79,19 @@ mem(size_t n)
 	}
 	return x;
 }
-#define mems(n,t) (mem((n)*sizeof(t)))
+void *
+remem(void *x, size_t n)
+{
+	x = realloc(x, n);
+	if (!x) {
+		fprintf(stderr, "*** realloc failed.\n");
+		exit(2);
+	}
+	return x;
+}
 #define make(obj) (mem(sizeof(obj)))
+#define mems(n,t) (mem((n)*sizeof(t)))
+#define extend(x,n,t) (remem((x),(n)*sizeof(t)))
 
 static struct symtab SYMBOLS = {0};
 
@@ -186,7 +197,7 @@ new_string(const char *src)
 	n = strlen(src);
 	v = make(struct value);
 	v->type = STRING;
-	v->string.data = mems(n, char);
+	v->string.data = mems(n+1, char);
 	v->string.len = n;
 	memcpy(v->string.data, src, n);
 
@@ -214,8 +225,7 @@ new_string(const char *src)
 			*ins++ = *head++;
 		}
 	}
-	if (n != v->string.len)
-		*ins = '\0';
+	*ins = '\0';
 
 	return v;
 }
@@ -270,11 +280,6 @@ free_value(struct value *v)
 
 	case STRING:
 		free(v->string.data);
-		break;
-
-	case SYMBOL:
-		free(v->symbol->name);
-		free(v->symbol);
 		break;
 
 	case LAMBDA:
@@ -334,71 +339,6 @@ fprintv(FILE *io, int in, struct value *v)
 	}
 }
 
-static char *
-slurpfd(int fd)
-{
-	ssize_t n, len, nread;
-	char *src, *p, *re;
-
-	n = len = 8191;
-	p = src = mems(len+1, char);
-	for (;;) {
-		if (n == 0) {
-			n = 8192; len += n;
-			re = realloc(src, len+1);
-			if (!re) {
-				fprintf(stderr, "*** realloc failed ***\n");
-				exit(1);
-			}
-			p = re + (p - src);
-			src = re;
-			memset(p, 0, n+1);
-		}
-		while ((nread = read(fd, p, n)) > 0) {
-			p += nread;
-			n -= nread;
-		}
-		if (nread < 0) {
-			free(src);
-			return NULL;
-		}
-		if (nread == 0) {
-			return src;
-		}
-	}
-}
-
-static char *
-slurp(const char *file)
-{
-	int fd;
-	ssize_t n, nread;
-	char *src, *p;
-
-	fd = open(file, O_RDONLY);
-	if (fd < 0) return NULL;
-
-	n = lseek(fd, 0, SEEK_END);
-	if (n < 0 || lseek(fd, 0, SEEK_SET) < 0) {
-		close(fd);
-		return NULL;
-	}
-
-	p = src = mems((size_t)n+1, char);
-	while ((nread = read(fd, p, n)) > 0) {
-		p += nread;
-		n -= nread;
-	}
-	if (nread < 0) {
-		free(src);
-		close(fd);
-		return NULL;
-	}
-
-	close(fd);
-	return src;
-}
-
 enum ttype {
 	T_OPENP,
 	T_CLOSEP,
@@ -450,22 +390,27 @@ struct token {
 	char       *data;
 };
 
-struct lexer {
-	const char *src;
+struct reader {
+	int         fd;
+	const char *file;
 
-	struct pos prev;
-	struct pos head;
+	char       *src;
+	size_t      used;
+	size_t      cap;
+
+	struct pos  prev;
+	struct pos  head;
 };
 
 static struct token *
-new_token(struct lexer *l, enum ttype type, char *data)
+new_token(struct reader *r, enum ttype type, char *data)
 {
 	struct token *token;
 
 	token = make(struct token);
 	token->type = type;
-	copy_pos(&token->pos, &l->prev);
-	token->len = l->head.offset - l->prev.offset;
+	copy_pos(&token->pos, &r->prev);
+	token->len = r->head.offset - r->prev.offset;
 	token->data = data;
 	return token;
 }
@@ -477,32 +422,64 @@ free_token(struct token *token)
 	free(token);
 }
 
+#define READER_BLOCK_SIZE 16384;
+
+static void
+read_more(struct reader *r)
+{
+	size_t n;
+
+	if (r->fd < 0)
+		return;
+
+	if (r->used == r->cap) {
+		r->cap += READER_BLOCK_SIZE;
+		r->src = extend(r->src, r->cap, char);
+	}
+
+	n = read(r->fd, r->src + r->used, r->cap - r->used);
+	if (n < 0) {
+		fprintf(stderr, "error reading from %s: %s (error %d)\n",
+				r->file, strerror(errno), errno);
+		exit(1);
+
+	} else if (n == 0) {
+		close(r->fd);
+		r->fd = -1;
+
+	} else {
+		r->used += n;
+		r->src[r->used] = '\0';
+	}
+}
+
 static char *
-lexeme(struct lexer *l)
+lexeme(struct reader *r)
 {
 	char *s;
 	size_t len;
 
-	len = l->head.offset - l->prev.offset;
+	len = r->head.offset - r->prev.offset;
 	s = mem(len + 1);
-	memcpy(s, l->src + l->prev.offset, len);
+	memcpy(s, r->src + r->prev.offset, len);
 	return s;
 }
 
-/* peek(&lexer) -> c
+/* peek(&reader) -> c
 
    return the character under the cursor,
    without changing the position.
  */
 static inline char
-peek(struct lexer *l)
+peek(struct reader *r)
 {
-	//fprintf(stderr, "PEEK: [%d] = ", l->head.offset);
-	//fprintf(stderr, "%02x (%c)\n", l->src[l->head.offset], l->src[l->head.offset]);
-	return l->src[l->head.offset];
+	if (r->head.offset == r->used)
+		read_more(r);
+
+	return r->src[r->head.offset];
 }
 
-/* next(&lexer)
+/* next(&reader)
 
    advance the cursor one position, updating
    line / column markers as necessary.
@@ -511,142 +488,197 @@ peek(struct lexer *l)
    before any adjustments took place.
  */
 static inline char
-next(struct lexer *l)
+next(struct reader *r)
 {
-	l->head.offset++;
-	l->head.column++;
-	if (l->src[l->head.offset] == '\n') {
-		l->head.column = 1;
-		l->head.line++;
+	if (r->head.offset == r->used)
+		read_more(r);
+
+	r->head.offset++;
+	r->head.column++;
+	if (r->src[r->head.offset] == '\n') {
+		r->head.column = 1;
+		r->head.line++;
 	}
 
-	return peek(l);
+	return peek(r);
 }
 
-/* resync(&lexer)
+/* resync(&reader)
 
    put the head cursor into the prev cursor,
    overwriting what was there previously.
  */
 static inline void
-resync(struct lexer *l)
+resync(struct reader *r)
 {
-	copy_pos(&l->prev, &l->head);
-	//fprintf(stderr, "RESYNC AT [%d]\n", l->prev.offset);
+	copy_pos(&r->prev, &r->head);
 }
 
 static struct token *
-lex(struct lexer *l)
+lex(struct reader *r)
 {
 	char c, q, esc;
 	struct token *tok;
 
 	/* eat whitespace */
 again:
-	for (c = peek(l); c && isspace(c); next(l), c = peek(l));
-	resync(l);
+	for (c = peek(r); c && isspace(c); next(r), c = peek(r));
+	resync(r);
 
 	switch (c) {
 	case '\0': return NULL;
 
 	case ';':
-		for (; c != '\n'; next(l), c = peek(l));
+		for (; c != '\n'; next(r), c = peek(r));
 		goto again;
 
-	case '\'': next(l); return new_token(l, T_QUOTE, NULL);
+	case '\'': next(r); return new_token(r, T_QUOTE, NULL);
 
 	case '#':
-		next(l);
-		switch (peek(l)) {
-		case 't': next(l); return new_token(l, T_TRUE,  NULL);
-		case 'f': next(l); return new_token(l, T_FALSE, NULL);
+		next(r);
+		switch (peek(r)) {
+		case 't': next(r); return new_token(r, T_TRUE,  NULL);
+		case 'f': next(r); return new_token(r, T_FALSE, NULL);
 		default:
-			return new_token(l, T_OOPS, "invalid '#' macro");
+			return new_token(r, T_OOPS, "invalid '#' macro");
 		}
 
-	case '(': next(l); return new_token(l, T_OPENP, NULL);
-	case ')': next(l); return new_token(l, T_CLOSEP, NULL);
+	case '(': next(r); return new_token(r, T_OPENP, NULL);
+	case ')': next(r); return new_token(r, T_CLOSEP, NULL);
 	case '"':
-		esc = 0; q = c; next(l); resync(l);
-		for (c = peek(l); c && (esc || c != q); next(l), c = peek(l));
-		tok = new_token(l, T_STRING, lexeme(l));
-		next(l); return tok;
+		esc = 0; q = c; next(r); resync(r);
+		for (c = peek(r); c && (esc || c != q); next(r), c = peek(r));
+		tok = new_token(r, T_STRING, lexeme(r));
+		next(r); return tok;
 	}
 	if (c && isdigit(c)) {
-		for (c = peek(l); c && isdigit(c); next(l), c = peek(l));
-		return new_token(l, T_NUMBER, lexeme(l));
+		for (c = peek(r); c && isdigit(c); next(r), c = peek(r));
+		return new_token(r, T_NUMBER, lexeme(r));
 	}
 	if (c) {
-		for (c = peek(l); c && !isspace(c) && c != ')'; next(l), c = peek(l));
-		return new_token(l, T_IDENT, lexeme(l));
+		for (c = peek(r); c && !isspace(c) && c != ')'; next(r), c = peek(r));
+		return new_token(r, T_IDENT, lexeme(r));
 	}
 
-	return new_token(l, T_OOPS, "syntax error");
+	return new_token(r, T_OOPS, "syntax error");
 }
 
-#define PSTACK 4096
+#define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
+#define CAR(l) ((l)->cons.car)
+#define CDR(l) ((l)->cons.cdr)
+#define CAAR(l) (CAR(CAR(l)))
+#define CADR(l) (CAR(CDR(l)))
+#define CDAR(l) (CDR(CAR(l)))
+#define CDDR(l) (CDR(CDR(l)))
+#define CADDR(l) (CAR(CDR(CDR(l))))
 
 static struct value *
-parse(const char *file, const char *src)
+read1(struct reader *r);
+
+#define readq(r) (new_cons(new_symbol("quote"), new_cons(read1(r), NULL)))
+
+static struct value *
+readl(struct reader *r)
 {
-	struct lexer l;
 	struct token *token;
-	struct value *value, **stack;
-	struct value *ROOK_QUOTE = (void *)(0x01);
-	int top;
+	struct value *lst, *head, *tmp;
 
-	l.src = src;
-	init_pos(&l.head, src);
-	init_pos(&l.prev, src);
-
-	top = -1;
-	stack = mems(PSTACK + 1, struct value *);
-
-	while ((token = lex(&l)) != NULL) {
-		if (top == PSTACK) {
-			fprintf(stderr, "pstack overflow\n");
-			exit(1);
-		}
+	head = lst = NULL;
+	while ((token = lex(r)) != NULL) {
 		switch (token->type) {
-		case T_OPENP:  stack[++top] = NULL;                    break;
-		case T_IDENT:  stack[++top] = new_symbol(token->data); break;
-		case T_STRING: stack[++top] = new_string(token->data); break;
-		case T_NUMBER: stack[++top] = new_number(token->data); break;
-		case T_QUOTE:  stack[++top] = ROOK_QUOTE; break;
-		case T_TRUE:   stack[++top] = ROOK_TRUE;  break;
-		case T_FALSE:  stack[++top] = ROOK_FALSE; break;
-		case T_CLOSEP:
-			value = NULL;
-			while (top >= 0) {
-				if (!stack[top]) { /* NULL is the '(' marker */
-					if (!value)
-						value = new_cons(NULL, NULL);
-
-					if (top > 0 && stack[top-1] == ROOK_QUOTE) {
-						top--;
-						value = new_cons(new_symbol("quote"), value);
-					}
-					stack[top] = value;
-					break;
-				}
-				value = new_cons(stack[top--], value);
-			}
-			break;
+		case T_IDENT:  lst = new_cons(new_symbol(token->data), lst); break;
+		case T_STRING: lst = new_cons(new_string(token->data), lst); break;
+		case T_NUMBER: lst = new_cons(new_number(token->data), lst); break;
+		case T_TRUE:   lst = new_cons(ROOK_TRUE, lst); break;
+		case T_FALSE:  lst = new_cons(ROOK_FALSE, lst); break;
+		case T_OPENP:  lst = new_cons(readl(r), lst); break;
+		case T_QUOTE:  lst = new_cons(readq(r), lst); break;
 
 		case T_OOPS:
 			fprintf(stderr, "oops: %s\n", token->data);
 			exit(1);
+
+		case T_CLOSEP:
+			while (lst) {
+				tmp = lst; lst = CDR(lst);
+				CDR(tmp) = head; head = tmp;
+			}
+			return tmp;
+			break;
 		}
-
-		free_token(token);
 	}
 
-	if (stack[0] == ROOK_QUOTE) {
-		return new_cons(
-			new_symbol("quote"),
-			new_cons(stack[1], NULL));
+	fprintf(stderr, "unterminated list form!\n");
+	exit(1);
+}
+
+static struct value *
+read1(struct reader *r)
+{
+	struct token *token;
+	struct value *v;
+
+	token = lex(r);
+	if (token == NULL)
+		return NULL;
+
+	switch (token->type) {
+	case T_IDENT:  v = new_symbol(token->data); break;
+	case T_STRING: v = new_string(token->data); break;
+	case T_NUMBER: v = new_number(token->data); break;
+	case T_TRUE:   v = ROOK_TRUE; break;
+	case T_FALSE:  v = ROOK_FALSE; break;
+	case T_OPENP:  v = readl(r); break;
+	case T_QUOTE:  v = readq(r); break;
+
+	case T_OOPS:
+		fprintf(stderr, "oops: %s\n", token->data);
+		exit(1);
+
+	case T_CLOSEP:
+		fprintf(stderr, "too many closing ')' found!\n");
+		exit(1);
+
+	default:
+		fprintf(stderr, "unrecognized token type %02x\n", token->type);
+		exit(1);
 	}
-	return stack[0];
+
+	free_token(token);
+	return v;
+}
+
+static struct reader *
+file_reader(const char *file)
+{
+	int fd;
+	struct reader *r;
+
+	fd = open(file, O_RDONLY);
+	if (fd < 0) return NULL;
+
+	r = make(struct reader);
+	r->fd = fd;
+	r->file = file;
+	return r;
+}
+
+static struct reader *
+fd_reader(const char *name, int fd)
+{
+	struct reader *r;
+
+	r = make(struct reader);
+	r->fd = fd;
+	r->file = name;
+	return r;
+}
+
+static void
+free_reader(struct reader *r)
+{
+	free(r->src);
+	free(r);
 }
 
 static char
@@ -679,15 +711,6 @@ len(struct value *lst)
 
 	return n;
 }
-
-#define truish(ok) ((ok) ? ROOK_TRUE : ROOK_FALSE)
-#define CAR(l) ((l)->cons.car)
-#define CDR(l) ((l)->cons.cdr)
-#define CAAR(l) (CAR(CAR(l)))
-#define CADR(l) (CAR(CDR(l)))
-#define CDAR(l) (CDR(CAR(l)))
-#define CDDR(l) (CDR(CDR(l)))
-#define CADDR(l) (CAR(CDR(CDR(l))))
 
 static void
 arity(const char *msg, struct value *lst, size_t min, size_t max)
@@ -854,6 +877,11 @@ static struct value *
 eval(struct value *expr, struct env *env)
 {
 	struct value *head, *tail, *fn, *values, *formals;
+
+	if (expr == NULL) {
+		fprintf(stderr, "NULL expr passed to eval()!\n");
+		exit(1);
+	}
 
 	switch (expr->type) {
 	case CONS: /* (op ...) form */
@@ -1074,48 +1102,11 @@ init(struct env *env)
 	set(env, intern("let"),    new_symbol("let"));
 }
 
-static int
-balanced(const char *src)
-{
-	const char *p;
-	int open, quote, esc;
-
-	quote = esc = 0;
-	open = 0;
-	for (p = src; *p; p++) {
-		if (quote) {
-			if (!esc) {
-				if (*p == '"') {
-					quote = 0;
-
-				} else if (*p == '\\') {
-					esc = 1;
-				}
-
-			} else {
-				esc = 0;
-			}
-
-		} else if (*p == '"') {
-			quote = 1;
-
-		} else if (*p == '(') {
-			open++;
-
-		} else  if (*p == ')') {
-			open--;
-		}
-	}
-	return open == 0;
-}
-
 static void
 repl(struct env *env)
 {
-	char *p, *src, *re;
-	size_t n, nread, len;
+	struct reader *r;
 	struct value *ast;
-	int done;
 
 	if (isatty(1)) {
 		fprintf(stdout, "\033[1;32mrook\033[0m \033[1;31mpre-alpha\033[0m v0.0.0.0.0\n");
@@ -1130,58 +1121,24 @@ repl(struct env *env)
 	}
 	fflush(stdout);
 
-	done = 0;
-	n = 0;
-	len = 8192;
-	p = src = mems(len, char);
-	while (!done) {
-		if (n == len) {
-			len += 8192;
-			re = realloc(src, len);
-			if (!re) {
-				fprintf(stderr, "*** realloc failed! ***\n");
-				exit(1);
-			}
-			src = re;
+	r = fd_reader("<stdin>", 0);
+	while ((ast = read1(r)) != 0) {
+		fprintv(stdout, 0, eval(ast, env));
+		if (isatty(1)) {
+			fprintf(stdout, "\n\033[1;36m♜\033[0m  ");
+		} else {
+			fprintf(stdout, "\n♜  ");
 		}
-		nread = read(0, p, len - n);
-		if (nread < 0) {
-			fprintf(stderr, "error reading stdin: %s (error %d)\n", strerror(errno), errno);
-			exit(1);
-		}
-		if (nread == 0) {
-			done = 1;
-		}
-		n += nread;
-		p += nread;
-		src[n] = '\0';
-
-		if (balanced(src)) {
-			ast = parse("<stdin>", src);
-			if (!ast) {
-				fprintf(stderr, "!!! parse error!\n");
-
-			} else {
-				fprintv(stdout, 0, eval(ast, env));
-				n = 0;
-				p = src;
-				if (isatty(1)) {
-					fprintf(stdout, "\n\033[1;36m♜\033[0m  ");
-				} else {
-					fprintf(stdout, "\n♜  ");
-				}
-				fflush(stdout);
-				continue;
-			}
-		}
+		fflush(stdout);
 	}
+	fprintf(stdout, "\n");
 }
 
 int
 main(int argc, char **argv)
 {
-	char *src;
-	struct value *ast;
+	struct reader *r;
+	struct value *form, *result;
 	struct env *env;
 
 	struct {
@@ -1226,27 +1183,30 @@ main(int argc, char **argv)
 	}
 
 	if (strcmp(argv[optind], "-") == 0) {
-		src = slurpfd(0);
+		r = fd_reader("<stdin>", 0);
 	} else {
-		src = slurp(argv[optind]);
-		if (!src) {
+		r = file_reader(argv[optind]);
+		if (!r) {
 			fprintf(stderr, "%s: %s (error %d)\n", argv[optind], strerror(errno), errno);
 			exit(1);
 		}
 	}
 
-	ast = eval(parse(argv[optind], src), env);
-	if (!ast) {
-		fprintf(stderr, "%s: parsing failed.\n", argv[optind]);
-		exit(1);
+	result = NULL;
+	while ((form = read1(r)) != NULL) {
+		result = eval(form, env);
+		if (!result) {
+			fprintf(stderr, "%s: parsing failed.\n", argv[optind]);
+			exit(1);
+		}
 	}
 
 	if (opts.evaluate) {
-		fprintv(stdout, 0, ast);
+		fprintv(stdout, 0, result);
 		fprintf(stdout, "\n");
 	}
 
-	free_value(ast);
-	free(src);
+	free_value(result);
+	free_reader(r);
 	return 0;
 }
