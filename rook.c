@@ -894,8 +894,8 @@ eval(struct value *expr, struct env *env)
 
 			if (head->symbol == intern("and")) {
 				/* (and x y ...) - evaluate each argument, in order, until a false
-				                  value is encountered; return #f when that happens
-				                  or #t otherwise. */
+				                   value is encountered; return #f when that happens
+				                   or #t otherwise. */
 				arity("(and ...)", tail, 2, 0);
 				while (tail) {
 					if (!truthy(eval(CAR(tail), env)))
