@@ -304,11 +304,18 @@ fprintv(FILE *io, int in, struct value *v)
 
 	switch (v->type) {
 	case CONS:
-		fprintf(io, "%s(cons ", pre);
+		fprintf(io, "%s(", pre);
+again:
 		fprintv(io, 0, v->cons.car);
 		if (v->cons.cdr) {
-			fprintf(io, "\n");
-			fprintv(io, in+6, v->cons.cdr);
+			if (v->cons.cdr->type == CONS) {
+				fprintf(io, " ");
+				v = v->cons.cdr;
+				goto again;
+			} else {
+				fprintf(io, " . ");
+				fprintv(io, 0, v->cons.cdr);
+			}
 		}
 		fprintf(io, ")");
 		break;
@@ -330,7 +337,7 @@ fprintv(FILE *io, int in, struct value *v)
 		break;
 
 	case SYMBOL:
-		fprintf(io, "%s'%s", pre, v->symbol->name);
+		fprintf(io, "%s%s", pre, v->symbol->name);
 		break;
 
 	case LAMBDA:

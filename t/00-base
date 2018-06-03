@@ -14,13 +14,25 @@ quoted symbols should evaluate to themselves
 ---
 (quote something)
 ---
-'something
+something
 ============
 single quote aliasing ('x) should behave like (quote x)
 ---
 'something
 ---
-'something
+something
+============
+quoting a list evaluates to the raw list
+---
+'(a b c)
+---
+(a b c)
+============
+eval should only strip off the outermost quote operator
+---
+''a
+---
+(quote a)
 ============
 (eq?) should work with numbers
 ---

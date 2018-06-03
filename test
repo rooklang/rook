@@ -22,10 +22,10 @@ sub test {
   my $got = do { local $/; <$tmp_fh>; };
 
   if ($got eq $want) {
-    print "OK $test\n";
+    print "[OK] $test\n";
 
   } else {
-    print "FAIL $test\n";
+    print "[!!] $test\n";
 
     open $pipe, "|-", "diff -y - $tmp_file >&2"
       or die "$f: unable to generate diff: $!\n";
