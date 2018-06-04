@@ -1,0 +1,156 @@
+2018-06-03, somewhere over Appalachia.
+Re: quasiquote; it appears I was wrong on a few points.
+  (cond) is almost required, as the more general form of (if).
+  (if) is in fact just a macro on (cond), or two macros if we
+  specialize on arity.
+
+  (append) and (list) need to be defined in the language before
+  we can get qq.  however, it also appears that implementing qq
+  in Rook itself may be possible, given all the meta-circular
+  implementations I'm seeing in papers like Bawden and some of the
+  AI memos.  IN FACT, this is how qq entered CL and Scheme circles,
+  via pet implementations that where reader macros were a thing.
+
+  maybe we should invent reader macros?
+
+  for now, I think we will just define our macros "the hard way"
+  to move past this wrinkle, and then bootstrap our way to qq,
+  in rook itself.
+
+Re: core operators (special forms and "closed" impls)
+  McCarthy defined the following in mccarthy60:
+
+  (atom x)   - returns true if x is an atom (not a list)
+  (eq a b)   - returns true if a is an atom, b is an atom,
+               and a and b are the same atom.
+               undefined otherwise.
+  (car l)    - returns the first value in a cons cell
+  (cdr l)    - returns the last value in a cons cell
+  (cons a b) - returns a freshly allocated cons cell
+
+  implicit in the rest of the paper are the following M-forms
+  (here translated into S-expressions):
+
+  (cond (p1 e1)    ;; a multi-branch conditional that falls
+        (p2 e2)    ;; until a pn matches, at which point the
+        ...        ;; corresponding en is evaluated.
+        (pn en))
+
+  (and a b)  - returns t if both a and b are t.  cond'able as:
+               (cond (a (cond (b t)
+                              (t f)))
+                     (t f))
+
+  (or a b)   - returns t if either a or b are t.  cond'able as:
+               (cond (a t)
+                     (t (cond (b t)
+                              (t f))))
+
+  (not a)    - returns t if a is not t.  cond'able as:
+               (cond (a f)
+                     (t t))
+
+  He then derives the following:
+
+  ;; retrieve the first (left-most) atomic symbol in an s-expression.
+  (ff x) -> (cond ((atom x) x)
+                   (t        (ff (car x))))
+
+  ;; substitue all occurences of y for x in z.
+  (subst x y z) -> (cond ((atom z) (cond ((eq z y) x)
+                                         (t        z)))
+                         (t (cons (subst x y (car z))
+                                  (subst x y (cdr z)))))
+
+  ;; return t if x and y are the same s-expression.
+  (equal x y) -> (or (and (atom x)
+                          (atom y)
+                          (eq x y))
+                     (and (not (atom x))
+                          (not (atom y))
+                          (equal (car x) (car y))
+                          (equal (cdr x) (cdr y))))
+
+  ;; return t if x is the atom NIL.
+  (null x) -> (and (atom x) (eq x NIL))
+
+  ;; append the list y to the tail of the list x.
+  (append x y) -> (cond ((null x) y)
+                        (t (cons (car x)
+                                 (append (cdr x) y))))
+
+  ;; return t if the s-expression x is found (wholly) within y
+  (among x y) -> (and (not (null y))
+                      (or (equal x (car y))
+                          (among x (cdr y))))
+
+  ;; return a list of pairs constructed from successive members of x and y
+  (pair x y) -> (cond ((and (null x) (null y)) NIL)
+                      ((and (not (atom x)) (not (atom y)))
+                        (cons (list (car x) (car y))
+                              (pair (cdr x) (cdr y)))))
+
+  ;; retrieve the value corresponding to x in a list structured like
+  ;;   ((x1 val1) (x2 val2) ... (xn valn))
+  (assoc x y) -> (cond ((eq (car (car y)) x)
+                         (car (cdr (car y))))
+                       (t (assoc x (cdr y))))
+
+  ;; substitute the values in an assoc list (x) for their variables in y
+  (sub2 x z) -> (cond ((null x) z)
+                      ((eq (car (car x)) z)
+                         (car (cdr (car x))))
+                      (t (sub2 (cdr x) z)))
+  (sublis x y) -> (cond ((atom y) (sub2 x y))
+                        (t (cons (sublis x (car y))
+                                 (sublis x (cdr y)))))
+
+
+  This is all to build up to apply, which Rook has yet to define.
+
+  (apply f args) -> (eval (cons (f (appq args))) NIL)
+
+  appq is then defined as:
+
+  (appq l) -> (cond ((null l) NIL)
+                    (t (cons (list (quote (car l))
+                                   (appq (cdr l))))))
+
+  and eval is defined as:
+
+  (eval e a) -> (cond
+                  ((atom e) (assoc e a)) ;; symbols -> denoted values
+                  ((atom (car e))
+                   (cond ((eq (car e) 'quote) (cacdr (e)))
+                         ((eq (car e) 'atom)  (atom (eval (cadr e) a)))
+                         ((eq (car e) 'eq)    (eq (eval (cadr e) a)
+                                                  (eval (caddr e) a)))
+                         ((eq (car e) 'cond)  (evcon (cdr e) a)) ;; TBD
+                         ((eq (car e) 'car)   (car (eval (cadr e) a)))
+                         ((eq (car e) 'cdr)   (cdr (eval (cadr e) a)))
+                         ((eq (car e) 'cons)  (cons (eval (cadr e) a)
+                                                    (eval (caadr e) a)))
+                         (t (eval (cons (assoc (car e) a)
+                                        (evlis (cdr e) a)) a)))
+                  ((eq (caar e) 'label)
+                    (eval (cons (caddar e) (cdr e))
+                          (const (list (cadar e) (car e)) a)))
+                  ((eq (caar e) 'lambda)
+                    (eval (caddar e)
+                          (append (pair (cadar e) (evlis (cdr e) a))
+                                  a)))))
+
+  and evcon is defined as
+
+  (evcon c a) -> (cond
+                   ((eval (caar c) a)      ;; evaluate the first condition
+                    (eval (cadar c) a))    ;; if t, evaluate that consequent
+                   (t (evcon (cdr c) a)))  ;; otherwise, try the next condition
+
+  and evlis is defined as
+
+  (evlis l a) -> (cond ((null l) NIL)
+                       (t (cons (eval (car l) a)
+                                (evlis (cdr l) a))))
+
+  translating all of this into C should be (fairly) straightforward.

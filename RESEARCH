@@ -17,7 +17,6 @@ The following Artificia Intelligence Lab Memos from MIT are germane:
   - [AIM-514 - Lambda: The Ultimate Opcode][AIM-514]
   - [AITR-474 - RABBIT: A Compiler for SCHEME][AITR-474]
 
-
 [AIM-349]: ref/AIM-349.pdf
 [AIM-353]: ref/AIM-353.pdf
 [AIM-379]: ref/AIM-379.pdf
@@ -25,5 +24,14 @@ The following Artificia Intelligence Lab Memos from MIT are germane:
 [AIM-453]: ref/AIM-453.pdf
 [AIM-514]: ref/AIM-514.pdf
 [AITR-474]: ref/AITR-474.pdf
+
+
+## Lisp Papers
+
+  - [McCarthy's original 1960 paper][mccarthy60]
+  - [Paul Graham's explanation of what McCarthy made][pgroots]
+
+[mccarthy60]: ref/mccarthy60.pdf
+[pgroots]:    ref/pgroots.pdf
 
 # vim:tw=76:ft=markdown
