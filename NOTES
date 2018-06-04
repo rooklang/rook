@@ -92,15 +92,15 @@ Re: core operators (special forms and "closed" impls)
 
   ;; retrieve the value corresponding to x in a list structured like
   ;;   ((x1 val1) (x2 val2) ... (xn valn))
-  (assoc x y) -> (cond ((eq (car (car y)) x)
-                         (car (cdr (car y))))
+  (assoc x y) -> (cond ((eq (caar y) x)
+                         (cadar y))
                        (t (assoc x (cdr y))))
 
   ;; substitute the values in an assoc list (x) for their variables in y
   (sub2 x z) -> (cond ((null x) z)
-                      ((eq (car (car x)) z)
-                         (car (cdr (car x))))
+                      ((eq (caar x) z) (cadar x))
                       (t (sub2 (cdr x) z)))
+
   (sublis x y) -> (cond ((atom y) (sub2 x y))
                         (t (cons (sublis x (car y))
                                  (sublis x (cdr y)))))
@@ -134,7 +134,7 @@ Re: core operators (special forms and "closed" impls)
                                         (evlis (cdr e) a)) a)))
                   ((eq (caar e) 'label)
                     (eval (cons (caddar e) (cdr e))
-                          (const (list (cadar e) (car e)) a)))
+                          (cons (list (cadar e) (car e)) a)))
                   ((eq (caar e) 'lambda)
                     (eval (caddar e)
                           (append (pair (cadar e) (evlis (cdr e) a))
