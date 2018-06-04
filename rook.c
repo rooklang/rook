@@ -33,11 +33,6 @@ struct symbol {
 	char *name;
 };
 
-struct lambda {
-	struct value *formals;
-	struct value *body;
-};
-
 typedef struct value * (*primop)(struct value *);
 
 struct value {
@@ -48,7 +43,6 @@ struct value {
 		SYMBOL,
 		BOOLEAN,
 		PRIMOP,
-		LAMBDA,
 	} type;
 	union {
 		struct cons    cons;
@@ -57,7 +51,6 @@ struct value {
 		struct symbol *symbol;
 		char           boolean;
 		primop         primop;
-		struct lambda  lambda;
 	};
 };
 
@@ -118,51 +111,6 @@ struct binding {
 	struct value   *value;
 	struct binding *next;
 };
-struct env {
-	struct binding *head;
-};
-
-static struct value *
-get(struct env *env, struct symbol *symbol)
-{
-	struct binding *b;
-	for (b = env->head; b; b = b->next) {
-		if (b->symbol == symbol) {
-			return b->value;
-		}
-	}
-	return NULL;
-}
-
-static struct value *
-set(struct env *env, struct symbol *symbol, struct value *value)
-{
-	struct binding *b;
-	for (b = env->head; b; b = b->next) {
-		if (b->symbol == symbol) {
-			b->value = value;
-			return b->value;
-		}
-	}
-	b = make(struct binding);
-	b->symbol = symbol;
-	b->value  = value;
-	b->next   = env->head;
-	env->head = b;
-	return b->value;
-}
-
-static struct value *
-def(struct env *env, struct symbol *symbol, struct value *value)
-{
-	struct binding *b;
-	b = make(struct binding);
-	b->symbol = symbol;
-	b->value  = value;
-	b->next   = env->head;
-	env->head = b;
-	return b->value;
-}
 
 static struct value *
 new_cons(struct value *car, struct value *cdr)
@@ -175,6 +123,8 @@ new_cons(struct value *car, struct value *cdr)
 	v->cons.cdr = cdr;
 	return v;
 }
+
+#define list2(a,b) (new_cons((a), new_cons((b), NULL)))
 
 static struct value *
 new_primop(primop op)
@@ -255,18 +205,6 @@ new_symbol(const char *name)
 	return v;
 }
 
-static struct value *
-new_lambda(struct value *formals, struct value *body)
-{
-	struct value *v;
-
-	v = make(struct value);
-	v->type = LAMBDA;
-	v->lambda.formals = formals;
-	v->lambda.body    = body;
-	return v;
-}
-
 static void
 free_value(struct value *v)
 {
@@ -280,11 +218,6 @@ free_value(struct value *v)
 
 	case STRING:
 		free(v->string.data);
-		break;
-
-	case LAMBDA:
-		free_value(v->lambda.formals);
-		free_value(v->lambda.body);
 		break;
 
 	default: /* noop */
@@ -338,10 +271,6 @@ again:
 
 	case SYMBOL:
 		fprintf(io, "%s%s", pre, v->symbol->name);
-		break;
-
-	case LAMBDA:
-		fprintf(io, "%s<lambda:%p>", pre, (void *)v);
 		break;
 	}
 }
@@ -577,7 +506,9 @@ again:
 #define CADR(l) (CAR(CDR(l)))
 #define CDAR(l) (CDR(CAR(l)))
 #define CDDR(l) (CDR(CDR(l)))
+#define CADAR(l) (CAR(CDR(CAR(l))))
 #define CADDR(l) (CAR(CDR(CDR(l))))
+#define CADDAR(l) (CAR(CDR(CDR(CAR(l)))))
 
 static struct value *
 read1(struct reader *r);
@@ -701,24 +632,6 @@ truthy(struct value *cond)
 	}
 }
 
-static size_t
-len(struct value *lst)
-{
-	size_t n;
-
-	n = 0;
-	while (lst) {
-		if (lst->type != CONS) {
-			fprintf(stderr, "len(): improper list!\n");
-			exit(1);
-		}
-		n++;
-		lst = lst->cons.cdr;
-	}
-
-	return n;
-}
-
 static void
 arity(const char *msg, struct value *lst, size_t min, size_t max)
 {
@@ -751,79 +664,6 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 		fprintv(stderr, 2, lst);
 		fprintf(stderr, "\n");
 		exit(1);
-	}
-}
-
-static struct value *
-primop_atom(struct value *args)
-{
-	/* (atom? a) - return #t if a is not a cons cell */
-
-	arity("(atom? ...)", args, 1, 1);
-	return truish(CAR(args)->type == CONS);
-}
-
-static struct value *
-primop_eq(struct value *args)
-{
-	/* (eq? a b) - return true if a and b are both atoms,
-	               and are equal to one another */
-
-	struct value *a, *b;
-
-	arity("(eq? ...)", args, 2, 2);
-	a = CAR(args);
-	b = CADR(args);
-
-	if (a->type != b->type)
-		return truish(0);
-
-	switch (a->type) {
-	default:     return truish(a == b);
-	case NUMBER: return truish(a->number == b->number);
-	case STRING: return truish(a->string.len == b->string.len
-	                        && memcmp(a->string.data, b->string.data, a->string.len) == 0);
-	}
-}
-
-static struct value *
-primop_car(struct value *args)
-{
-	/* (car x) - return the first slot in cons cell x */
-	arity("(car ...)", args, 1, 1);
-	return CADR(args);
-}
-
-static struct value *
-primop_cdr(struct value *args)
-{
-	/* (cdr x) - return the second slot in cons cell x */
-	arity("(cdr ...)", args, 1, 1);
-	return CDAR(args);
-}
-
-static struct value *
-primop_cons(struct value *args)
-{
-	/* (cons a b) - make a new cons cell, populated with a and b */
-	arity("(cons ...)", args, 2, 2);
-	return new_cons(CAR(args), CADR(args));
-}
-
-static struct value *
-primop_typeof(struct value *args)
-{
-	/* (typeof x) - return the type of value x; one of:
-	                'unknown, 'cons, 'string, 'number,
-	                'sybol, or 'boolean */
-	arity("(typeof? ...)", args, 1, 1);
-	switch (CAR(args)->type) {
-	default:      return new_symbol("unknown");
-	case CONS:    return new_symbol("cons");
-	case STRING:  return new_symbol("string");
-	case NUMBER:  return new_symbol("number");
-	case SYMBOL:  return new_symbol("symbol");
-	case BOOLEAN: return new_symbol("boolean");
 	}
 }
 
@@ -875,213 +715,169 @@ primop_printf(struct value *args)
 }
 
 static struct value *
-eval(struct value *expr, struct env *env);
+eval(struct value *, struct value *);
 
 static struct value *
-evlis(struct value *lst, struct env *env);
+evlis(struct value *, struct value *);
 
 static struct value *
-eval(struct value *expr, struct env *env)
+evcon(struct value *, struct value *);
+
+static struct value *
+append(struct value *, struct value *);
+
+static struct value *
+assoc(struct value *, struct value *);
+
+static struct value *
+pair(struct value *, struct value *);
+
+static struct value *
+eval(struct value *expr, struct value *env)
 {
-	struct value *head, *tail, *fn, *values, *formals;
-
 	if (expr == NULL) {
 		fprintf(stderr, "NULL expr passed to eval()!\n");
 		exit(1);
 	}
 
-	switch (expr->type) {
-	case CONS: /* (op ...) form */
-		head = CAR(expr);
-		tail = CDR(expr);
-		if (!head) return expr;
-
-		if (head->type == SYMBOL) {
-			/* special forms */
-
-			if (head->symbol == intern("and")) {
-				/* (and x y ...) - evaluate each argument, in order, until a false
-				                   value is encountered; return #f when that happens
-				                   or #t otherwise. */
-				arity("(and ...)", tail, 2, 0);
-				while (tail) {
-					if (!truthy(eval(CAR(tail), env)))
-						return ROOK_FALSE;
-					tail = CDR(tail);
-				}
-				return ROOK_TRUE;
-			}
-
-			if (head->symbol == intern("or")) {
-				/* (or x y ...) - evaluate each argument, in order, until a true
-				                  value is encountered; return #t when that happens
-				                  or #f otherwise. */
-				arity("(or ...)", tail, 2, 0);
-				while (tail) {
-					if (truthy(eval(CAR(tail), env)))
-						return ROOK_TRUE;
-					tail = CDR(tail);
-				}
-				return ROOK_FALSE;
-			}
-
-			if (head->symbol == intern("do")) {
-				/* (do ...) - evaluate all arguments, in order, and return the
-				              value of the last, or #f if no arguments given */
-				head = ROOK_FALSE;
-				while (tail) {
-					head = eval(CAR(tail), env);
-					tail = CDR(tail);
-				}
-				return head;
-			}
-
-			if (head->symbol == intern("set")) {
-				/* (set var e) - update the environment, setting the innermost
-				                 binding of the variable var to the result of
-				                 evaluating e in the initial environment. */
-				arity("(set ...)", tail, 2, 2);
-
-				head = CAR(tail);
-				if (head->type != SYMBOL) {
-					fprintf(stderr, "non-symbol in var position of (set var val)!\n");
-					exit(1);
-				}
-				return set(env, head->symbol, eval(CADR(tail), env));
-			}
-
-			if (head->symbol == intern("if")) {
-				/* (if e x y) - evaluate e; if true, evaluate x; otherwise,
-				                evaluate y.  return the result of the chosen
-				                evaluation. */
-				arity("(if ...)", tail, 2, 3);
-
-				return truthy(eval(CAR(tail), env))
-				     ? eval(CADR(tail), env)
-				     : eval(CADDR(tail), env);
-			}
-
-			if (head->symbol == intern("quote")) {
-				/* (quote x) - return x, skipping evaluation */
-				arity("(quote ...)", tail, 1, 1);
-				return CAR(tail);
-			}
-
-			if (head->symbol == intern("let")) {
-				/* (let (x v) e) - introduce a new binding for x, setting it
-				                   to the value of evaluating v, and then evaluate
-				                   e in the newly-modified environment. */
-				struct value *lst, *var, *val;
-				arity("(let ...)", tail, 2, 0);
-
-				lst = CAR(tail);
-				while (lst) {
-					if (!CADR(lst)) {
-						fprintf(stderr, "uneven bindings list given to (let ...)\n");
-						exit(1);
-					}
-
-					var = CAR(lst);
-					if (var->type != SYMBOL) {
-						fprintf(stderr, "non-symbol in let var position!\n");
-						exit(1);
-					}
-
-					val = eval(CADR(lst), env);
-					def(env, var->symbol, eval(CADR(lst), env));
-					lst = CDDR(lst);
-				}
-				val = ROOK_FALSE;
-				for (lst = CDR(tail); lst; lst = CDR(lst)) {
-					val = eval(CAR(lst), env);
-				}
-				/* FIXME: undo damage to environment */
-				return val;
-			}
-
-			if (head->symbol == intern("lambda")) {
-				/* (lambda (args ...) body) - create a new anonymous function. */
-				arity("(lambda ...)", tail, 2, 0);
-				if (CAR(tail)->type != CONS) {
-					fprintf(stderr, "non-list lambda formals spec!\n");
-					exit(1);
-				}
-				for (head = CAAR(tail); head; head = CDR(head)) {
-					if (head->type != SYMBOL) {
-						fprintf(stderr, "non-symbol in lambda formals list!\n");
-						exit(1);
-					}
-				}
-
-				return new_lambda(CAR(tail),
-					new_cons(
-						new_symbol("do"),
-						CDR(tail)));
-			}
-
-			fn = eval(head, env);
-			if (!fn) {
-				fprintf(stderr, "warning: undefined function '%s'\n", head->symbol->name);
-				exit(1);
-			}
-
-			if (fn->type == PRIMOP) {
-				return fn->primop(evlis(tail, env));
-			}
-
-			fprintf(stderr, "invalid form!\n");
-			exit(1);
-		}
-
-		head = eval(head, env);
-		if (head->type == LAMBDA) {
-			values  = evlis(tail, env);
-			formals = head->lambda.formals;
-
-			if (len(values) != len(formals)) {
-				fprintf(stderr, "invalid arity for lambda call!\n");
-				exit(1);
-			}
-
-			while (values) {
-				def(env, CAR(formals)->symbol, CAR(values));
-				values  = CDR(values);
-				formals = CDR(formals);
-			}
-			/* FIXME: undo damage to environment */
-			return eval(head->lambda.body, env);
-		}
-
-		fprintf(stderr, "non-symbol in calling position!\n");
-		exit(2);
-
-	case BOOLEAN:
-	case LAMBDA:
-	case PRIMOP:
-	case STRING:
-	case NUMBER:
+	if (expr->type == BOOLEAN
+	 || expr->type == STRING
+	 || expr->type == NUMBER) {
 		return expr;
-
-	case SYMBOL:
-		return get(env, expr->symbol);
-
-	default:
-		fprintf(stderr, "semantic error\n");
-		exit(2);
 	}
+
+	if (expr->type == SYMBOL) {
+		return assoc(expr, env);
+	}
+
+	if (expr->type == CONS && CAR(expr)->type == SYMBOL) {
+		if (CAR(expr)->symbol == intern("quote")) {
+			/* (quote x) - return x, skipping evaluation */
+			arity("(quote ...)", CDR(expr), 1, 1);
+			return CADR(expr);
+		}
+
+		if (CAR(expr)->symbol == intern("atom")) {
+			arity("(atom ...)", CDR(expr), 1, 1);
+			expr = eval(CADR(expr), env);
+			return truish(expr && expr->type != CONS);
+		}
+
+		if (CAR(expr)->symbol == intern("eq")) {
+			arity("(eq ...)", CDR(expr), 2, 2);
+			if (CADR(expr)->type != CADDR(expr)->type)
+				return truish(0);
+
+			switch (CADR(expr)->type) {
+			default:     return truish(CADR(expr) == CADDR(expr));
+			case NUMBER: return truish(CADR(expr)->number == CADDR(expr)->number);
+			case STRING: return truish(CADR(expr)->string.len == CADDR(expr)->string.len
+			                        && memcmp(CADR(expr)->string.data,
+			                                  CADDR(expr)->string.data,
+			                                  CADR(expr)->string.len) == 0);
+			}
+		}
+
+		if (CAR(expr)->symbol == intern("cond")) {
+			return evcon(CDR(expr), env);
+		}
+
+		if (CAR(expr)->symbol == intern("car")) {
+			arity("(car ...)", CDR(expr), 1, 1);
+			return CAR(eval(CADR(expr), env)); /* FIXME */
+		}
+
+		if (CAR(expr)->symbol == intern("cdr")) {
+			arity("(cdr ...)", CDR(expr), 1, 1);
+			return CDR(eval(CADR(expr), env)); /* FIXME */
+		}
+
+		if (CAR(expr)->symbol == intern("cons")) {
+			arity("(cons ...)", CDR(expr), 2, 2);
+			return new_cons(eval(CADR(expr), env),
+			                eval(CADDR(expr), env));
+		}
+
+		return eval(new_cons(assoc(CAR(expr), env),
+		                     evlis(CDR(expr), env)), env);
+	}
+
+	if (expr->type == CONS && CAR(expr)->type == CONS
+	 && CAAR(expr)->type == SYMBOL && CAAR(expr)->symbol == intern("label")) {
+		return eval(new_cons(CADDAR(expr), CDR(expr)),
+		            new_cons(
+		              list2(CADAR(expr), CAR(expr)),
+		              env));
+	}
+
+	if (expr->type == CONS && CAR(expr)->type == CONS
+	 && CAAR(expr)->type == SYMBOL && CAAR(expr)->symbol == intern("lambda")) {
+		return eval(CADDAR(expr),
+		            append(pair(CADAR(expr), evlis(CDR(expr), env)), env));
+	}
+
+	fprintf(stderr, "invalid form!\n");
+	fprintv(stderr, 4, expr);
+	fprintf(stderr, "\n");
+	exit(1);
 }
 
 static struct value *
-evlis(struct value *lst, struct env *env)
+evlis(struct value *lst, struct value *env)
 {
 	if (!lst) return NULL;
 	return new_cons(eval(CAR(lst), env),
 	                evlis(CDR(lst), env));
 }
 
-static void
-init(struct env *env)
+static struct value *
+evcon(struct value *cond, struct value *env)
 {
+	while (cond) {
+		if (truthy(eval(CAAR(cond), env)))
+			return eval(CADAR(cond), env);
+		cond = CDR(cond);
+	}
+	return ROOK_FALSE;
+}
+
+static struct value *
+append(struct value *x, struct value *y)
+{
+	if (!x) return y;
+	return new_cons(CAR(x), append(CDR(x), y));
+}
+
+static struct value *
+assoc(struct value *var, struct value *alst)
+{
+	while (alst && CAR(alst)) {
+		if (CAAR(alst)->type == SYMBOL && var->type == SYMBOL
+		 && CAAR(alst)->symbol == var->symbol)
+			return CADAR(alst);
+		alst = CDR(alst);
+	}
+	return ROOK_FALSE; // FIXME
+}
+
+static struct value *
+pair(struct value *x, struct value *y)
+{
+	if (!x && !y) return ROOK_FALSE;
+	if (x->type == CONS && y->type == CONS)
+		return new_cons(
+		         new_cons(CAR(x), new_cons(CAR(y), NULL)),
+		         pair(CDR(x), CDR(y)));
+
+	fprintf(stderr, "invalid pair call!\n");
+	exit(1);
+}
+
+static struct value *
+init()
+{
+	struct value *env = NULL;
+
 	ROOK_TRUE = make(struct value);
 	ROOK_TRUE->type = BOOLEAN;
 	ROOK_TRUE->boolean = 1;
@@ -1090,38 +886,25 @@ init(struct env *env)
 	ROOK_FALSE->type = BOOLEAN;
 	ROOK_FALSE->boolean = 0;
 
-	set(env, intern("atom?"),  new_primop(primop_atom));
-	set(env, intern("eq?"),    new_primop(primop_eq));
-	set(env, intern("car"),    new_primop(primop_car));
-	set(env, intern("cdr"),    new_primop(primop_cdr));
-	set(env, intern("cons"),   new_primop(primop_cons));
-	set(env, intern("typeof"), new_primop(primop_typeof));
-	set(env, intern("print"),  new_primop(primop_print));
-	set(env, intern("env"),    new_primop(primop_env));
-	set(env, intern("printf"), new_primop(primop_printf));
-
-	set(env, intern("and"),    new_symbol("and"));
-	set(env, intern("or"),     new_symbol("or"));
-	set(env, intern("do"),     new_symbol("do"));
-	set(env, intern("set"),    new_symbol("set"));
-	set(env, intern("if"),     new_symbol("if"));
-	set(env, intern("quote"),  new_symbol("quote"));
-	set(env, intern("let"),    new_symbol("let"));
+	env = assoc(list2(new_symbol("print"),  new_primop(primop_print)),  env);
+	env = assoc(list2(new_symbol("env"),    new_primop(primop_env)),    env);
+	env = assoc(list2(new_symbol("printf"), new_primop(primop_printf)), env);
+	return env;
 }
 
 static void
-repl(struct env *env)
+repl(struct value *env)
 {
 	struct reader *r;
 	struct value *ast;
 
 	if (isatty(1)) {
-		fprintf(stdout, "\033[1;32mrook\033[0m \033[1;31mpre-alpha\033[0m v0.0.0.0.0\n");
+		fprintf(stdout, "\033[1;32mrook\033[0m \033[1;31mpre-alpha\033[0m v0\n");
 		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
 		fprintf(stdout, "---\n");
 		fprintf(stdout, "\033[1;36m♜\033[0m  ");
 	} else {
-		fprintf(stdout, "rook pre-alpha v0.0.0.0.0\n");
+		fprintf(stdout, "rook pre-alpha v0\n");
 		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
 		fprintf(stdout, "---\n");
 		fprintf(stdout, "♜  ");
@@ -1145,8 +928,7 @@ int
 main(int argc, char **argv)
 {
 	struct reader *r;
-	struct value *form, *result;
-	struct env *env;
+	struct value *form, *result, *env;
 
 	struct {
 		int evaluate;
@@ -1181,8 +963,7 @@ main(int argc, char **argv)
 	}
 
 	QUIET = opts.quiet;
-	env = make(struct env);
-	init(env);
+	env = init();
 
 	if (argc - optind != 1) {
 		repl(env);

@@ -10,69 +10,116 @@
 ---
 #f
 ============
-quoted symbols should evaluate to themselves
+(quote) quoted symbols should evaluate to themselves
 ---
 (quote something)
 ---
 something
 ============
-single quote aliasing ('x) should behave like (quote x)
+(quote) single quote aliasing ('x) should behave like (quote x)
 ---
 'something
 ---
 something
 ============
-quoting a list evaluates to the raw list
+(quote) quoting a list evaluates to the raw list
 ---
 '(a b c)
 ---
 (a b c)
 ============
-eval should only strip off the outermost quote operator
+(quote) eval should only strip off the outermost quote operator
 ---
 ''a
 ---
 (quote a)
 ============
-(eq?) should work with numbers
+(atom) numbers should be considered atoms
 ---
-(eq? 1 1)
----
-#t
-============
-(eq?) should handle inequality with numbers
----
-(eq? 1 2)
----
-#f
-============
-(eq?) should work with strings
----
-(eq? "a" "a")
+(atom 42)
 ---
 #t
 ============
-(eq?) should handle inequality with strings
+(atom) booleans should be considered atoms
 ---
-(eq? "a" "b")
+(atom #f)
+---
+#t
+============
+(atom) symbols should be considered atoms
+---
+(atom 'a)
+---
+#t
+============
+(atom) cons cells should not be considered atoms
+---
+(atom (cons 1 2))
 ---
 #f
 ============
-(do) should return the value of its only body form
+(eq) should work with numbers
 ---
-(do 1)
+(eq 1 1)
 ---
-1
+#t
 ============
-(do) should return the value of its last body form, if given 2 body forms
+(eq) should handle inequality with numbers
 ---
-(do 1 2)
+(eq 1 2)
 ---
-2
+#f
 ============
-(do) should return the value of its last body form, if given 3 body forms
+(eq) should work with strings
 ---
-(do 1 2 3)
+(eq "a" "a")
 ---
-3
+#t
+============
+(eq) should handle inequality with strings
+---
+(eq "a" "b")
+---
+#f
+============
+(cond) should return the evaluation of the first true condition
+---
+(cond ((eq 1 0) 'one-eq-zero)
+      ((eq 2 2) 'ok)
+      (#t       'fall-through))
+---
+ok
+============
+(cond) should handle the degenerate case
+---
+(cond (#t 'ok))
+---
+ok
+============
+(cond) should fall through to the default case
+---
+(cond ((eq 1 0) 'one-eq-zero)
+      (#t       'ok))
+---
+ok
+============
+(cond) should return the evaluation of the first true condition (order matters!)
+---
+(cond ((eq 1 0) 'one-eq-zero)
+      (#t       'ok)
+      ((eq 2 2) 'never-reached))
+---
+ok
+============
+(car) the car of (a . b) should be a
+---
+(car (cons 'a 'b))
+---
+a
+============
+(cdr) the cdr of (a . b) should be b
+---
+(cdr (cons 'a 'b))
+---
+b
 ============
