@@ -154,3 +154,27 @@ Re: core operators (special forms and "closed" impls)
                                 (evlis (cdr l) a))))
 
   translating all of this into C should be (fairly) straightforward.
+
+
+#################################################################
+
+2018-06-07, in the heart of Atlanta, GA
+Re: rook0 and env extension
+  today i finished up the implementation of the (functions ...) form.
+  it works like this:
+
+    (functions
+        ((f (a1 a2 a3) e1 e2 e3)
+         (g () e4))
+      (f (g)))
+
+  by the time the interpreter gets to the `(f (g))` evaluation,
+  the env will have been extended to include two new lambda's,
+  keyed to the symbols 'f and 'g (this is a special form).  this
+  allows the interpreter to evaluate the final argument to the
+  `(functions ...)` form.
+
+  in reality, this is a `(let ...)` form, but i wanted to divorce
+  it from any particular scheme/cl semantics.  all defined symbols
+  will be available in the environment whenever any of the defined
+  functions is applied.
