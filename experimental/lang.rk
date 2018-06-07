@@ -1,0 +1,94 @@
+;; i'm not sure if this works
+(macro (list (rest))
+  (if (nil? rest)
+      #f
+      ('cons (car rest) (list (cdr rest)))))
+
+(macro (fn sig (body))
+  `(set ,(car sig) (lambda ,(cdr sig) (do ,@body)))
+
+(macro (.fn sig (body))
+  (list 'set (car sig)
+        (list 'lambda (cdr sig)
+          (append (list 'do) body))))
+
+(macro (and x y)
+  `(if ,x (if ,y #t #f) #f))
+
+(macro (.and x y)
+  (list 'if x (list 'x y #t #f) #f))
+
+(macro (or x y)
+  `(if ,x #t (if ,y #t #f)))
+
+(fn (not x)
+  (if x #f #t))
+
+;;;;;
+
+(fn (atom? x)
+  (not (eq? (typeof x 'cons))))
+
+(fn (cons? x)
+  (eq? (typeof x) 'cons))
+
+(fn (number? x)
+  (eq? (typeof x) 'number))
+
+(fn (string? x)
+  (eq? (typeof x) 'string))
+
+(fn (nil? l)
+  (if x #f #t))
+
+(fn (list? l)
+  (or (nil? l)
+      (and (cons? l)
+           (list? (cdr l)))))
+
+(fn (true? x)
+  (if x #t #f))
+
+(fn (false? x)
+  (not (true? x)))
+
+;;;;;
+
+(fn (caar l) (car (car l)))
+(fn (cadr l) (car (cdr l)))
+(fn (cdar l) (cdr (car l)))
+(fn (cddr l) (cdr (cdr l)))
+
+(fn (caaar l) (car (car (car l)))
+(fn (caadr l) (car (car (cdr l)))
+(fn (cadar l) (car (cdr (car l)))
+(fn (caddr l) (car (cdr (cdr l)))
+(fn (cdaar l) (cdr (car (car l)))
+(fn (cdadr l) (car (cdr (car l)))
+(fn (cddar l) (cdr (cdr (car l)))
+(fn (cdddr l) (cdr (cdr (cdr l)))
+
+(fn (caaaar l) (car (car (car (car l))))
+(fn (caaadr l) (car (car (car (cdr l))))
+(fn (caadar l) (car (car (cdr (car l))))
+(fn (caaddr l) (car (car (cdr (cdr l))))
+(fn (cadaar l) (car (cdr (car (car l))))
+(fn (cadadr l) (car (cdr (car (cdr l))))
+(fn (caddar l) (car (cdr (cdr (car l))))
+(fn (cadddr l) (car (cdr (cdr (cdr l))))
+(fn (cdaaar l) (cdr (car (car (car l))))
+(fn (cdaadr l) (cdr (car (car (cdr l))))
+(fn (cdadar l) (cdr (car (cdr (car l))))
+(fn (cdaddr l) (cdr (car (cdr (cdr l))))
+(fn (cddaar l) (cdr (cdr (car (car l))))
+(fn (cddadr l) (cdr (cdr (car (cdr l))))
+(fn (cdddar l) (cdr (cdr (cdr (car l))))
+(fn (cddddr l) (cdr (cdr (cdr (cdr l))))
+
+;;;;;
+
+(mac (list l)
+  (if (nil? l)
+      #f
+      (cons (car ,l)
+            (list (cdr ,l)))))
