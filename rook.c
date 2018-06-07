@@ -235,6 +235,11 @@ fprintv(FILE *io, int in, struct value *v)
 	pre = mems(in + 1, char);
 	memset(pre, ' ', in);
 
+	if (!v) {
+		fprintf(io, "%s<NULL>", pre);
+		return;
+	}
+
 	switch (v->type) {
 	case CONS:
 		fprintf(io, "%s(", pre);
