@@ -1,0 +1,13 @@
+;; rook1 - an interpreted bootstrapping compiler
+;;         for the Rook Lisp programming language.
+;;
+;; author:  James Hunt <james@niftylogic.com>
+;; created: 2018-06-07
+;;
+
+(functions
+  ((main (msg rc)
+    (printf msg)
+    (syscall 'exit rc)))
+
+  (main "Hello, World!\n" 0))
