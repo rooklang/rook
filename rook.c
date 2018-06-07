@@ -735,6 +735,8 @@ pair(struct value *, struct value *);
 static struct value *
 eval(struct value *expr, struct value *env)
 {
+	struct value *op, *lst;
+
 	if (expr == NULL) {
 		fprintf(stderr, "NULL expr passed to eval()!\n");
 		exit(1);
@@ -798,8 +800,32 @@ eval(struct value *expr, struct value *env)
 			                eval(CADDR(expr), env));
 		}
 
-		return eval(new_cons(assoc(CAR(expr), env),
-		                     evlis(CDR(expr), env)), env);
+		if (CAR(expr)->symbol == intern("functions")) {
+			/* (functions
+			      ((f (args) e...)
+			       (g (args) e...))
+			     (f ...))
+			 */
+			arity("(functions ...)", CDR(expr), 2, 2);
+			if (CADR(expr)->type != CONS) {
+				fprintf(stderr, "(functions ...) requires a list of abstractions as its first argument.\n");
+				exit(4);
+			}
+			lst = CADR(expr);
+			while (lst != NULL) {
+				env = new_cons(list2(CAAR(lst), new_cons(new_symbol("lambda"), CDAR(lst))), env);
+				lst = CDR(lst);
+			}
+
+			return eval(CADDR(expr), env);
+		}
+
+		op = eval(CAR(expr), env);
+		if (op->type == PRIMOP) {
+			return op->primop(evlis(CDR(expr), env));
+		}
+
+		return eval(new_cons(op, evlis(CDR(expr), env)), env);
 	}
 
 	if (expr->type == CONS && CAR(expr)->type == CONS
@@ -851,19 +877,26 @@ append(struct value *x, struct value *y)
 static struct value *
 assoc(struct value *var, struct value *alst)
 {
+	if (var->type != SYMBOL) {
+		fprintf(stderr, "invalid assoc(...) call -- var is not a symbol.\n");
+		exit(3);
+	}
+
 	while (alst && CAR(alst)) {
-		if (CAAR(alst)->type == SYMBOL && var->type == SYMBOL
+		if (CAAR(alst)->type == SYMBOL
 		 && CAAR(alst)->symbol == var->symbol)
 			return CADAR(alst);
 		alst = CDR(alst);
 	}
-	return ROOK_FALSE; // FIXME
+
+	fprintf(stderr, "undefined symbol %s\n", var->symbol->name);
+	exit(4);
 }
 
 static struct value *
 pair(struct value *x, struct value *y)
 {
-	if (!x && !y) return ROOK_FALSE;
+	if (!x && !y) return NULL;
 	if (x->type == CONS && y->type == CONS)
 		return new_cons(
 		         new_cons(CAR(x), new_cons(CAR(y), NULL)),
