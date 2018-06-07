@@ -720,6 +720,30 @@ primop_printf(struct value *args)
 }
 
 static struct value *
+primop_syscall(struct value *args)
+{
+	/* (syscall 'name ...) - issue a system call */
+	arity("(syscall ...)", args, 1, 0);
+	if (CAR(args)->type != SYMBOL) {
+		fprintf(stderr, "non-symbol argument to syscall\n");
+		exit(2);
+	}
+
+	if (CAR(args)->symbol == intern("exit")) {
+		arity("(syscall 'exit ...)", args, 2, 2);
+		if (CADR(args)->type != NUMBER) {
+			fprintf(stderr, "invalid exit code: ");
+			fprintv(stderr, 0, CADR(args));
+			fprintf(stderr, "\n");
+			exit(4);
+		}
+		exit(CADR(args)->number);
+	}
+
+	return ROOK_TRUE;
+}
+
+static struct value *
 eval(struct value *, struct value *);
 
 static struct value *
@@ -924,9 +948,10 @@ init()
 	ROOK_FALSE->type = BOOLEAN;
 	ROOK_FALSE->boolean = 0;
 
-	env = assoc(list2(new_symbol("print"),  new_primop(primop_print)),  env);
-	env = assoc(list2(new_symbol("env"),    new_primop(primop_env)),    env);
-	env = assoc(list2(new_symbol("printf"), new_primop(primop_printf)), env);
+	env = new_cons(list2(new_symbol("print"),   new_primop(primop_print)),   env);
+	env = new_cons(list2(new_symbol("env"),     new_primop(primop_env)),     env);
+	env = new_cons(list2(new_symbol("printf"),  new_primop(primop_printf)),  env);
+	env = new_cons(list2(new_symbol("syscall"), new_primop(primop_syscall)), env);
 	return env;
 }
 
