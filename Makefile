@@ -1,6 +1,8 @@
 CFLAGS := -g -Wall -Wpedantic -fprofile-arcs -ftest-coverage
 LDFLAGS := --coverage
 
+all: rook
+
 demo: rook
 	./rook hello.rk
 
@@ -18,6 +20,7 @@ copycov: coverage
 
 clean:
 	rm -rf coverage/
+	rm -f *.gc??
 	rm -f lcov.info rook *.o
 
 rook: rook.o
