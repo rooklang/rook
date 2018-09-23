@@ -12,11 +12,11 @@ sub test {
   my ($test, $src, $want) = @src;
   chomp($test);
 
-  open my $pipe, "|-", "./rook --evaluate --quiet - >$tmp_file"
-    or die "$f: failed to exec ./rook: $!\n";
+  open my $pipe, "|-", "./rook0 --evaluate --quiet - >$tmp_file"
+    or die "$f: failed to exec ./rook0: $!\n";
   print $pipe $src;
   close $pipe
-    or die "$f: ./rook failed: $!\n";
+    or die "$f: ./rook0 failed: $!\n";
 
   seek $tmp_fh, 0, 0;
   my $got = do { local $/; <$tmp_fh>; };

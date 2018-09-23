@@ -1,12 +1,12 @@
 CFLAGS := -g -Wall -Wpedantic -fprofile-arcs -ftest-coverage
 LDFLAGS := --coverage
 
-all: rook
+all: rook0
 
-demo: rook
-	./rook hello.rk
+demo: rook0
+	./rook0 hello.rk
 
-test: rook
+test: rook0
 	./test t/*
 cover:
 	lcov --directory . \
@@ -21,8 +21,8 @@ copycov: coverage
 clean:
 	rm -rf coverage/
 	rm -f *.gc??
-	rm -f lcov.info rook *.o
+	rm -f lcov.info rook rook0 *.o
 
-rook: rook.o
+rook0: rook0.o
 
-.PHONY: demo test cover coverage copycov clean
+.PHONY: all demo test cover coverage copycov clean
