@@ -10,6 +10,7 @@
 #include <getopt.h>
 
 static int QUIET = 0;
+static int DEBUG = 0;
 
 struct value;
 
@@ -243,6 +244,7 @@ fprintv(FILE *io, int in, struct value *v)
 	switch (v->type) {
 	case CONS:
 		fprintf(io, "%s(", pre);
+		if (DEBUG) fprintf(io, "[%p] ", (void *)v);
 again:
 		fprintv(io, 0, v->cons.car);
 		if (v->cons.cdr) {
@@ -259,23 +261,28 @@ again:
 		break;
 
 	case PRIMOP:
-		fprintf(io, "%s<op:%p>", pre, (unsigned char *)&(v->primop));
+		fprintf(io, "%s<op:%p>", pre, (void *)&(v->primop));
+		if (DEBUG) fprintf(io, "@%p", (void *)v);
 		break;
 
 	case STRING:
 		fprintf(io, "%s\"%s\"", pre, v->string.data);
+		if (DEBUG) fprintf(io, "@%p", (void *)v);
 		break;
 
 	case NUMBER:
 		fprintf(io, "%s%d", pre, v->number);
+		if (DEBUG) fprintf(io, "@%p", (void *)v);
 		break;
 
 	case BOOLEAN:
 		fprintf(io, "%s#%c", pre, v->boolean ? 't' : 'f');
+		if (DEBUG) fprintf(io, "@%p", (void *)v);
 		break;
 
 	case SYMBOL:
 		fprintf(io, "%s%s", pre, v->symbol->name);
+		if (DEBUG) fprintf(io, "@%p", (void *)v->symbol);
 		break;
 	}
 }
@@ -513,6 +520,7 @@ again:
 #define CDDR(l) (CDR(CDR(l)))
 #define CADAR(l) (CAR(CDR(CAR(l))))
 #define CADDR(l) (CAR(CDR(CDR(l))))
+#define CDDAR(l) (CDR(CDR(CAR(l))))
 #define CADDAR(l) (CAR(CDR(CDR(CAR(l)))))
 
 static struct value *
@@ -633,7 +641,7 @@ truthy(struct value *cond)
 	case STRING:  return cond->string.len != 0              ? 1 : 0;
 	case NUMBER:  return cond->number != 0                  ? 1 : 0;
 	case SYMBOL:  return 1; /* FIXME */
-	case BOOLEAN: return cond->boolean;
+	case BOOLEAN: return cond->boolean == ROOK_TRUE->boolean;
 	}
 }
 
@@ -670,6 +678,57 @@ arity(const char *msg, struct value *lst, size_t min, size_t max)
 		fprintf(stderr, "\n");
 		exit(1);
 	}
+}
+
+static struct value *
+primop_eq(struct value *args)
+{
+	arity("(eq ...)", args, 2, 2);
+
+	if (CAR(args)->type != CADR(args)->type)
+		return ROOK_FALSE;
+
+	switch (CAR(args)->type) {
+	default:     return truish(CAR(args) == CADR(args));
+	case SYMBOL: return truish(CAR(args)->symbol == CADR(args)->symbol);
+	case NUMBER: return truish(CAR(args)->number == CADR(args)->number);
+	case STRING: return truish(CAR(args)->string.len == CADR(args)->string.len
+	                        && memcmp(CAR(args)->string.data,
+	                                  CADR(args)->string.data,
+	                                  CAR(args)->string.len) == 0);
+	}
+}
+
+static struct value *
+primop_atom(struct value *args)
+{
+	arity("(atom ...)", args, 1, 1);
+	return truish(CAR(args) && CAR(args)->type != CONS);
+}
+
+static struct value *
+primop_car(struct value *args)
+{
+	arity("(car ...)", args, 1, 1);
+	if (!CAR(args) || CAR(args)->type != CONS)
+		return ROOK_FALSE;
+	return CAAR(args);
+}
+
+static struct value *
+primop_cdr(struct value *args)
+{
+	arity("(cdr ...)", args, 1, 1);
+	if (!CAR(args) || CAR(args)->type != CONS)
+		return ROOK_FALSE;
+	return CDAR(args);
+}
+
+static struct value *
+primop_cons(struct value *args)
+{
+	arity("(cons ...)", args, 1, 1);
+	return new_cons(CAR(args), CADR(args));
 }
 
 static struct value *
@@ -744,13 +803,58 @@ primop_syscall(struct value *args)
 }
 
 static struct value *
+primop_open(struct value *args)
+{
+	struct value *v;
+
+	/* (open "path") - open a file for reading */
+	arity("(open ...)", args, 1, 1);
+	if (CAR(args)->type != STRING) {
+		fprintf(stderr, "non-string argument to open\n");
+		exit(2);
+	}
+
+	fprintf(stderr, "opening '%s' for reading...\n", CAR(args)->string.data);
+	v = make(struct value);
+	v->type = NUMBER;
+	v->number = open(CAR(args)->string.data, O_RDONLY);
+	return v;
+}
+
+static struct value *
+primop_read(struct value *args)
+{
+	struct reader *r;
+
+	/* (read fd) - read a form from a file descriptor */
+	arity("(read ...)", args, 1, 1);
+	if (CAR(args)->type != NUMBER) {
+		fprintf(stderr, "non-fd argument to read\n");
+		exit(2);
+	}
+
+	fprintf(stderr, "reading a form from fd %d...\n", CAR(args)->number);
+	r = fd_reader("<fd...>", CAR(args)->number);
+	return read1(r);
+}
+
+static struct value *
+primop_list(struct value *args)
+{
+	return args;
+}
+
+static struct value *
 eval(struct value *, struct value *);
 
 static struct value *
 evlis(struct value *, struct value *);
 
 static struct value *
-evcon(struct value *, struct value *);
+evprogn(struct value *, struct value *);
+
+static struct value *
+evcond(struct value *, struct value *);
 
 static struct value *
 append(struct value *, struct value *);
@@ -788,45 +892,12 @@ eval(struct value *expr, struct value *env)
 			return CADR(expr);
 		}
 
-		if (CAR(expr)->symbol == intern("atom")) {
-			arity("(atom ...)", CDR(expr), 1, 1);
-			expr = eval(CADR(expr), env);
-			return truish(expr && expr->type != CONS);
-		}
-
-		if (CAR(expr)->symbol == intern("eq")) {
-			arity("(eq ...)", CDR(expr), 2, 2);
-			if (CADR(expr)->type != CADDR(expr)->type)
-				return truish(0);
-
-			switch (CADR(expr)->type) {
-			default:     return truish(CADR(expr) == CADDR(expr));
-			case NUMBER: return truish(CADR(expr)->number == CADDR(expr)->number);
-			case STRING: return truish(CADR(expr)->string.len == CADDR(expr)->string.len
-			                        && memcmp(CADR(expr)->string.data,
-			                                  CADDR(expr)->string.data,
-			                                  CADR(expr)->string.len) == 0);
-			}
+		if (CAR(expr)->symbol == intern("progn")) {
+			return evprogn(CDR(expr), env);
 		}
 
 		if (CAR(expr)->symbol == intern("cond")) {
-			return evcon(CDR(expr), env);
-		}
-
-		if (CAR(expr)->symbol == intern("car")) {
-			arity("(car ...)", CDR(expr), 1, 1);
-			return CAR(eval(CADR(expr), env)); /* FIXME */
-		}
-
-		if (CAR(expr)->symbol == intern("cdr")) {
-			arity("(cdr ...)", CDR(expr), 1, 1);
-			return CDR(eval(CADR(expr), env)); /* FIXME */
-		}
-
-		if (CAR(expr)->symbol == intern("cons")) {
-			arity("(cons ...)", CDR(expr), 2, 2);
-			return new_cons(eval(CADR(expr), env),
-			                eval(CADDR(expr), env));
+			return evcond(CDR(expr), env);
 		}
 
 		if (CAR(expr)->symbol == intern("functions")) {
@@ -854,7 +925,7 @@ eval(struct value *expr, struct value *env)
 			return op->primop(evlis(CDR(expr), env));
 		}
 
-		return eval(new_cons(op, evlis(CDR(expr), env)), env);
+		return eval(new_cons(op, CDR(expr)), env);
 	}
 
 	if (expr->type == CONS && CAR(expr)->type == CONS
@@ -867,8 +938,10 @@ eval(struct value *expr, struct value *env)
 
 	if (expr->type == CONS && CAR(expr)->type == CONS
 	 && CAAR(expr)->type == SYMBOL && CAAR(expr)->symbol == intern("lambda")) {
-		return eval(CADDAR(expr),
-		            append(pair(CADAR(expr), evlis(CDR(expr), env)), env));
+		return evprogn(CDDAR(expr),
+		               append(pair(CADAR(expr),
+		                           evlis(CDR(expr), env)),
+		                      env));
 	}
 
 	fprintf(stderr, "invalid form!\n");
@@ -886,11 +959,22 @@ evlis(struct value *lst, struct value *env)
 }
 
 static struct value *
-evcon(struct value *cond, struct value *env)
+evprogn(struct value *lst, struct value *env)
+{
+	struct value *e;
+	while (lst != NULL) {
+		e = eval(CAR(lst), env);
+		lst = CDR(lst);
+	}
+	return e;
+}
+
+static struct value *
+evcond(struct value *cond, struct value *env)
 {
 	while (cond) {
 		if (truthy(eval(CAAR(cond), env)))
-			return eval(CADAR(cond), env);
+			return evprogn(CDAR(cond), env);
 		cond = CDR(cond);
 	}
 	return ROOK_FALSE;
@@ -948,10 +1032,18 @@ init()
 	ROOK_FALSE->type = BOOLEAN;
 	ROOK_FALSE->boolean = 0;
 
+	env = new_cons(list2(new_symbol("eq"),      new_primop(primop_eq)),      env);
+	env = new_cons(list2(new_symbol("atom"),    new_primop(primop_atom)),    env);
+	env = new_cons(list2(new_symbol("car"),     new_primop(primop_car)),     env);
+	env = new_cons(list2(new_symbol("cdr"),     new_primop(primop_cdr)),     env);
+	env = new_cons(list2(new_symbol("cons"),    new_primop(primop_cons)),    env);
 	env = new_cons(list2(new_symbol("print"),   new_primop(primop_print)),   env);
 	env = new_cons(list2(new_symbol("env"),     new_primop(primop_env)),     env);
 	env = new_cons(list2(new_symbol("printf"),  new_primop(primop_printf)),  env);
 	env = new_cons(list2(new_symbol("syscall"), new_primop(primop_syscall)), env);
+	env = new_cons(list2(new_symbol("open"),    new_primop(primop_open)),    env);
+	env = new_cons(list2(new_symbol("read"),    new_primop(primop_read)),    env);
+	env = new_cons(list2(new_symbol("list"),    new_primop(primop_list)),    env);
 	return env;
 }
 
