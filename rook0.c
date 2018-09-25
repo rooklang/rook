@@ -12,6 +12,9 @@
 static int QUIET = 0;
 static int DEBUG = 0;
 
+static int    ARGC = 0;
+static char **ARGV = NULL;
+
 struct value;
 
 static struct value *ROOK_TRUE;
@@ -237,7 +240,7 @@ fprintv(FILE *io, int in, struct value *v)
 	memset(pre, ' ', in);
 
 	if (!v) {
-		fprintf(io, "%s<NULL>", pre);
+		fprintf(io, "%snil", pre);
 		return;
 	}
 
@@ -645,21 +648,29 @@ truthy(struct value *cond)
 	}
 }
 
-static void
-arity(const char *msg, struct value *lst, size_t min, size_t max)
+static size_t
+listlen(struct value *lst)
 {
 	size_t n;
 
 	n = 0;
 	while (lst) {
 		if (lst->type != CONS) {
-			fprintf(stderr, "%s: improper list!\n", msg);
+			fprintf(stderr, "improper list!\n");
 			exit(1);
 		}
 		n++;
 		lst = CDR(lst);
 	}
+	return n;
+}
 
+static void
+arity(const char *msg, struct value *lst, size_t min, size_t max)
+{
+	size_t n;
+
+	n = listlen(lst);
 	if (min == max) {
 		if (n != min) {
 			fprintf(stderr, "%s: wrong arity (expected %li, got %li)\n", msg, min, n);
@@ -707,6 +718,13 @@ primop_atom(struct value *args)
 }
 
 static struct value *
+primop_null(struct value *args)
+{
+	arity("(null ...)", args, 1, 1);
+	return truish(!CAR(args));
+}
+
+static struct value *
 primop_car(struct value *args)
 {
 	arity("(car ...)", args, 1, 1);
@@ -727,7 +745,7 @@ primop_cdr(struct value *args)
 static struct value *
 primop_cons(struct value *args)
 {
-	arity("(cons ...)", args, 1, 1);
+	arity("(cons ...)", args, 2, 2);
 	return new_cons(CAR(args), CADR(args));
 }
 
@@ -737,8 +755,8 @@ primop_print(struct value *args)
 	/* (print e) - print the s-expr e to standard output */
 	arity("(print ...)", args, 1, 1);
 	if (!QUIET) {
-		fprintv(stderr, 0, CAR(args));
-		fprintf(stderr, "\n");
+		fprintv(stdout, 0, CAR(args));
+		fprintf(stdout, "\n");
 	}
 	return ROOK_TRUE;
 }
@@ -814,7 +832,6 @@ primop_open(struct value *args)
 		exit(2);
 	}
 
-	fprintf(stderr, "opening '%s' for reading...\n", CAR(args)->string.data);
 	v = make(struct value);
 	v->type = NUMBER;
 	v->number = open(CAR(args)->string.data, O_RDONLY);
@@ -833,7 +850,6 @@ primop_read(struct value *args)
 		exit(2);
 	}
 
-	fprintf(stderr, "reading a form from fd %d...\n", CAR(args)->number);
 	r = fd_reader("<fd...>", CAR(args)->number);
 	return read1(r);
 }
@@ -842,6 +858,116 @@ static struct value *
 primop_list(struct value *args)
 {
 	return args;
+}
+
+static struct value *
+primop_append(struct value *args)
+{
+	struct value *lst;
+
+	/* (append l1 l2) */
+	arity("(append ...)", args, 2, 2);
+	if (CAR(args)->type != CONS) {
+		fprintf(stderr, "non-cons argument to append\n");
+		exit(2);
+	}
+
+	lst = CAR(args);
+	while (CDR(lst)) {
+		lst = CDR(lst);
+	}
+	CDR(lst) = CADR(args);
+	return CAR(args);
+}
+
+static struct value *
+primop_incf(struct value *args)
+{
+	arity("(+1 ...)", args, 1, 1);
+	if (CAR(args)->type != NUMBER) {
+		fprintf(stderr, "non-number argument to +1\n");
+		exit(2);
+	}
+
+	CAR(args)->number++;
+	return CAR(args);
+}
+
+static struct value *
+primop_concat(struct value *args)
+{
+	char *full, *part;
+	int len;
+	struct value *v;
+
+	full = part = NULL;
+	while (args) {
+		switch (CAR(args)->type) {
+		default:
+			fprintf(stderr, "non-scalar argument to concat\n");
+			exit(2);
+
+		case STRING:
+			full = realloc(full, part-full + CAR(args)->string.len + 1);
+			if (!full) {
+				fprintf(stderr, "failed to allocate mamory.\n");
+				exit(2);
+			}
+			if (!part) part = full;
+			memcpy(part, CAR(args)->string.data, CAR(args)->string.len);
+			part += CAR(args)->string.len;
+			*part = '\0';
+			break;
+
+		case NUMBER:
+			len = snprintf(NULL, 0, "%d", CAR(args)->number);
+			full = realloc(full, part-full + len + 1);
+			if (!full) {
+				fprintf(stderr, "failed to allocate mamory.\n");
+				exit(2);
+			}
+			if (!part) part = full;
+			snprintf(part, len+1, "%d", CAR(args)->number);
+			part += len;
+			break;
+		}
+
+		args = CDR(args);
+	}
+
+	v = make(struct value);
+	v->type = STRING;
+	v->string.data = full;
+	v->string.len = part-full;
+	return v;
+}
+
+static struct value *
+primop_args(struct value *args)
+{
+	struct value *v;
+
+	arity("(args)", args, 0, 0);
+
+	v = make(struct value);
+	v->type = NUMBER;
+	v->number = ARGC;
+	return v;
+}
+
+static struct value *
+primop_argn(struct value *args)
+{
+	arity("(argn ...)", args, 1, 1);
+	if (CAR(args)->type != NUMBER) {
+		fprintf(stderr, "non-number argument given to argn\n");
+		exit(2);
+	}
+
+	if (CAR(args)->number < 0 || CAR(args)->number >= ARGC)
+		return NULL; /* nil */
+
+	return new_string(ARGV[CAR(args)->number]);
 }
 
 static struct value *
@@ -900,6 +1026,25 @@ eval(struct value *expr, struct value *env)
 			return evcond(CDR(expr), env);
 		}
 
+		if (CAR(expr)->symbol == intern("let")) {
+			/* (let ((x e...)
+			         (y e...))
+			     (body ...))
+			 */
+			arity("(let ...)", CDR(expr), 2, 2);
+			if (CADR(expr)->type != CONS) {
+				fprintf(stderr, "(let ...) requires a list of bindings as its first argument.\n");
+				exit(4);
+			}
+			lst = CADR(expr);
+			while (lst != NULL) {
+				env = new_cons(list2(CAAR(lst), eval(CADAR(lst), env)), env);
+				lst = CDR(lst);
+			}
+
+			return eval(CADDR(expr), env);
+		}
+
 		if (CAR(expr)->symbol == intern("functions")) {
 			/* (functions
 			      ((f (args) e...)
@@ -938,6 +1083,13 @@ eval(struct value *expr, struct value *env)
 
 	if (expr->type == CONS && CAR(expr)->type == CONS
 	 && CAAR(expr)->type == SYMBOL && CAAR(expr)->symbol == intern("lambda")) {
+		size_t want_arity = listlen(CADAR(expr));
+		size_t got_arity  = listlen(CDR(expr));
+		if (want_arity != got_arity) {
+			fprintf(stderr, "(lambda ...) application failed: arity mismatch; wanted %lu arguments, but got %lu\n",
+					want_arity, got_arity);
+			exit(1);
+		}
 		return evprogn(CDDAR(expr),
 		               append(pair(CADAR(expr),
 		                           evlis(CDR(expr), env)),
@@ -1015,7 +1167,9 @@ pair(struct value *x, struct value *y)
 		         new_cons(CAR(x), new_cons(CAR(y), NULL)),
 		         pair(CDR(x), CDR(y)));
 
-	fprintf(stderr, "invalid pair call!\n");
+	fprintf(stderr, "invalid pair() call!\n");
+	if (!x || x->type != CONS) fprintf(stderr, "  - x (arg1) is not a CONS cell\n");
+	if (!y || y->type != CONS) fprintf(stderr, "  - y (arg2) is not a CONS cell\n");
 	exit(1);
 }
 
@@ -1032,8 +1186,10 @@ init()
 	ROOK_FALSE->type = BOOLEAN;
 	ROOK_FALSE->boolean = 0;
 
+	env = new_cons(list2(new_symbol("nil"),     NULL),                       env);
 	env = new_cons(list2(new_symbol("eq"),      new_primop(primop_eq)),      env);
 	env = new_cons(list2(new_symbol("atom"),    new_primop(primop_atom)),    env);
+	env = new_cons(list2(new_symbol("null"),    new_primop(primop_null)),    env);
 	env = new_cons(list2(new_symbol("car"),     new_primop(primop_car)),     env);
 	env = new_cons(list2(new_symbol("cdr"),     new_primop(primop_cdr)),     env);
 	env = new_cons(list2(new_symbol("cons"),    new_primop(primop_cons)),    env);
@@ -1044,6 +1200,11 @@ init()
 	env = new_cons(list2(new_symbol("open"),    new_primop(primop_open)),    env);
 	env = new_cons(list2(new_symbol("read"),    new_primop(primop_read)),    env);
 	env = new_cons(list2(new_symbol("list"),    new_primop(primop_list)),    env);
+	env = new_cons(list2(new_symbol("append"),  new_primop(primop_append)),  env);
+	env = new_cons(list2(new_symbol("+1"),      new_primop(primop_incf)),    env);
+	env = new_cons(list2(new_symbol("concat"),  new_primop(primop_concat)),  env);
+	env = new_cons(list2(new_symbol("args"),    new_primop(primop_args)),    env);
+	env = new_cons(list2(new_symbol("argn"),    new_primop(primop_argn)),    env);
 	return env;
 }
 
@@ -1120,11 +1281,15 @@ main(int argc, char **argv)
 	QUIET = opts.quiet;
 	env = init();
 
-	if (argc - optind != 1) {
+	ARGC = argc - optind;
+	ARGV = argv + optind;
+
+	if (ARGC < 1) {
 		repl(env);
 		exit(0);
 	}
 
+	ARGV++; ARGC--;
 	if (strcmp(argv[optind], "-") == 0) {
 		r = fd_reader("<stdin>", 0);
 	} else {
