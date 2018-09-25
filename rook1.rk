@@ -5,9 +5,104 @@
 ;; created: 2018-06-07
 ;;
 
-(functions
-  ((main (msg rc)
-    (printf msg)
-    (syscall 'exit rc)))
+(let ((*label* 0))
+  (functions
+    ((bail (error)
+       (printf "error: ")
+       (printf error)
+       (printf "\n")
+       (syscall 'exit 1))
 
-  (main "Hello, World!\n" 0))
+     (newlabel ()
+       (+1 *label*)
+       (concat "label" *label*))
+
+     (emit (l)
+       (cond ((null l) #t)
+             ((eq 'nop (car (car l)))
+              (emit (cdr l)))
+
+             (#t
+              (print (car l))
+              (emit (cdr l)))))
+
+     (flatten (l)
+       (cond ((null l) nil)
+
+             ((atom (car l))
+              (cons (car l) (flatten (cdr l))))
+
+             ((atom (car (car l)))
+              (cons (car l) (flatten (cdr l))))
+
+             (#t (append (flatten (car l))
+                         (flatten (cdr l))))))
+
+     (gencond (e ift iff)
+       (cond ((atom e)
+              (gencond (list 'not (list 'eq e 'nil)) ift iff))
+
+             ((eq (car e) 'eq)
+              (list
+                (geneval 'r1 (car (cdr e)))
+                (geneval 'r2 (car (cdr (cdr e))))
+                (list 'cmp 'r1 'r2)
+                (list 'je ift)
+                (list 'jmp iff)))
+
+             ((eq (car e) 'not)
+              (gencond (car (cdr e)) iff ift))
+
+             ((eq (car e) 'and)
+              (let ((lbl (newlabel)))
+                (list
+                  (gencond (car (cdr e)) lbl iff)
+                  lbl
+                  (genond (car (cdr (cdr e))) ift iff))))
+
+             ((eq (car e) 'or)
+              (let ((lbl (newlabel)))
+                (list
+                  (gencond (car (cdr e)) ift lbl)
+                  lbl
+                  (gencond (car (cdr (cdr e))) ift iff))))
+
+             (#t
+               (list
+                 (list 'error "unrecognized sub-expression" e)))))
+
+     (geneval (r e)
+       (cond ((atom e)
+              (list
+                (list 'load r e)))
+
+             ((eq (car e) 'if)
+              (let ((ift (newlabel))
+                    (iff (newlabel))
+                    (end (newlabel)))
+                (list
+                  (gencond (car (cdr e)) ift iff)
+                  ift
+                  (geneval r (car (cdr (cdr e))))
+                  (list 'jmp end)
+                  iff
+                  (geneval r (car (cdr (cdr (cdr e)))))
+                  end
+                  (list 'nop))))
+
+             ((eq (car e) 'printf)
+                (list
+                  (geneval r (car (cdr e)))
+                  (list 'printf)))
+
+             (#t
+               (list
+                 (list 'error "unhandled-toplevel" e)))))
+
+     (main ()
+       (cond ((eq (args) 1) #t)
+             (#t (bail "USAGE: rook0 rook1.rk <script>")))
+       (emit (flatten (geneval 'r1 (read (open (argn 0))))))
+       (syscall 'exit 0)))
+
+     (main)))
