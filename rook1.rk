@@ -12,6 +12,10 @@
        (printf error)
        (printf "\n")
        (syscall 'exit 1))
+     (caar (x) (car (car x)))
+     (cadr (x) (car (cdr x)))
+     (caddr (x) (car (cdr (cdr x))))
+     (cadddr (x) (car (cdr (cdr (cdr x)))))
 
      (newlabel ()
        (+1 *label*)
@@ -19,7 +23,7 @@
 
      (emit (l)
        (cond ((null l) #t)
-             ((eq 'nop (car (car l)))
+             ((eq 'nop (caar l))
               (emit (cdr l)))
 
              (#t
@@ -32,7 +36,7 @@
              ((atom (car l))
               (cons (car l) (flatten (cdr l))))
 
-             ((atom (car (car l)))
+             ((atom (caar l))
               (cons (car l) (flatten (cdr l))))
 
              (#t (append (flatten (car l))
@@ -44,28 +48,28 @@
 
              ((eq (car e) 'eq)
               (list
-                (geneval 'r1 (car (cdr e)))
-                (geneval 'r2 (car (cdr (cdr e))))
+                (geneval 'r1 (cadr e))
+                (geneval 'r2 (caddr e))
                 (list 'cmp 'r1 'r2)
                 (list 'je ift)
                 (list 'jmp iff)))
 
              ((eq (car e) 'not)
-              (gencond (car (cdr e)) iff ift))
+              (gencond (cadr e) iff ift))
 
              ((eq (car e) 'and)
               (let ((lbl (newlabel)))
                 (list
-                  (gencond (car (cdr e)) lbl iff)
+                  (gencond (cadr e) lbl iff)
                   lbl
-                  (genond (car (cdr (cdr e))) ift iff))))
+                  (genond (caddr e) ift iff))))
 
              ((eq (car e) 'or)
               (let ((lbl (newlabel)))
                 (list
-                  (gencond (car (cdr e)) ift lbl)
+                  (gencond (cadr e) ift lbl)
                   lbl
-                  (gencond (car (cdr (cdr e))) ift iff))))
+                  (gencond (caddr e) ift iff))))
 
              (#t
                (list
@@ -81,18 +85,18 @@
                     (iff (newlabel))
                     (end (newlabel)))
                 (list
-                  (gencond (car (cdr e)) ift iff)
+                  (gencond (cadr e) ift iff)
                   ift
-                  (geneval r (car (cdr (cdr e))))
+                  (geneval r (caddr e))
                   (list 'jmp end)
                   iff
-                  (geneval r (car (cdr (cdr (cdr e)))))
+                  (geneval r (cadddr e))
                   end
                   (list 'nop))))
 
              ((eq (car e) 'printf)
                 (list
-                  (geneval r (car (cdr e)))
+                  (geneval r (cadr e))
                   (list 'printf)))
 
              (#t
