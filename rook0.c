@@ -1216,12 +1216,12 @@ repl(struct value *env)
 
 	if (isatty(1)) {
 		fprintf(stdout, "\033[1;32mrook\033[0m \033[1;31mpre-alpha\033[0m v0\n");
-		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
+		fprintf(stdout, "copyright (c) 2018 James Hunt\n");
 		fprintf(stdout, "---\n");
 		fprintf(stdout, "\033[1;36m♜\033[0m  ");
 	} else {
 		fprintf(stdout, "rook pre-alpha v0\n");
-		fprintf(stdout, "copyright (c) 2018 James Hunt & Dennis Bell\n");
+		fprintf(stdout, "copyright (c) 2018 James Hunt\n");
 		fprintf(stdout, "---\n");
 		fprintf(stdout, "♜  ");
 	}
