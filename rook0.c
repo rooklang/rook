@@ -541,7 +541,7 @@ readl(struct reader *r)
 	struct token *token;
 	struct value *lst, *head, *tmp;
 
-	head = lst = NULL;
+	tmp = head = lst = NULL;
 	while ((token = lex(r)) != NULL) {
 		switch (token->type) {
 		case T_IDENT:  lst = new_cons(new_symbol(token->data), lst); break;
