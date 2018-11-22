@@ -245,6 +245,10 @@ fprintv(FILE *io, int in, struct value *v)
 	}
 
 	switch (v->type) {
+	default:
+		fprintf(io, "%s<unknown @%p t:%02x>", pre, (void *)v, v->type);
+		break;
+
 	case CONS:
 		fprintf(io, "%s(", pre);
 		if (DEBUG) fprintf(io, "[%p] ", (void *)v);
