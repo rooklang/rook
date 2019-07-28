@@ -660,7 +660,9 @@ listlen(struct value *lst)
 	n = 0;
 	while (lst) {
 		if (lst->type != CONS) {
-			fprintf(stderr, "improper list!\n");
+			fprintf(stderr, "listlen() given an improper list; (cd^%lur lst) was not a CONS!\n", n);
+			fprintv(stderr, 2, lst);
+			fprintf(stderr, "\n");
 			exit(1);
 		}
 		n++;
@@ -1251,8 +1253,9 @@ main(int argc, char **argv)
 	struct value *form, *result, *env;
 
 	struct {
-		int evaluate;
 		int quiet;
+		int debug;
+		int evaluate;
 	} opts;
 
 	memset(&opts, 0, sizeof(opts));
@@ -1261,28 +1264,35 @@ main(int argc, char **argv)
 		int c, idx;
 		static struct option longs[] = {
 			{ "quiet",    no_argument, 0, 'q' },
+			{ "debug",    no_argument, 0, 'D' },
 			{ "evaluate", no_argument, 0, 'E' },
 			{ 0,          0,           0,  0  }
 		};
 
-		c = getopt_long(argc, argv, "qE", longs, &idx);
+		c = getopt_long(argc, argv, "qDE", longs, &idx);
 		if (c < 0) break;
 		switch (c) {
 		case 'q':
 			opts.quiet = 1;
+			opts.debug = 0;
 			break;
+
+		case 'D':
+			opts.quiet = 0;
+			opts.debug = 1;
 
 		case 'E':
 			opts.evaluate = 1;
 			break;
 
 		default:
-			fprintf(stderr, "USAGE: %s [--evaluate] [--quiet] code.rk\n", argv[0]);
+			fprintf(stderr, "USAGE: %s [--evaluate] [--quiet] [--debug] code.rk\n", argv[0]);
 			exit(1);
 		}
 	}
 
 	QUIET = opts.quiet;
+	DEBUG = opts.debug;
 	env = init();
 
 	ARGC = argc - optind;
