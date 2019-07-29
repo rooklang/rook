@@ -717,6 +717,25 @@ primop_eq(struct value *args)
 }
 
 static struct value *
+primop_ne(struct value *args)
+{
+	arity("(ne ...)", args, 2, 2);
+
+	if (CAR(args)->type != CADR(args)->type)
+		return ROOK_TRUE;
+
+	switch (CAR(args)->type) {
+	default:     return truish(CAR(args) != CADR(args));
+	case SYMBOL: return truish(CAR(args)->symbol != CADR(args)->symbol);
+	case NUMBER: return truish(CAR(args)->number != CADR(args)->number);
+	case STRING: return truish(CAR(args)->string.len != CADR(args)->string.len
+	                        || memcmp(CAR(args)->string.data,
+	                                  CADR(args)->string.data,
+	                                  CAR(args)->string.len) != 0);
+	}
+}
+
+static struct value *
 primop_atom(struct value *args)
 {
 	arity("(atom ...)", args, 1, 1);
@@ -1199,6 +1218,7 @@ init()
 
 	env = new_cons(list2(new_symbol("nil"),     NULL),                       env);
 	env = new_cons(list2(new_symbol("eq"),      new_primop(primop_eq)),      env);
+	env = new_cons(list2(new_symbol("ne"),      new_primop(primop_ne)),      env);
 	env = new_cons(list2(new_symbol("atom"),    new_primop(primop_atom)),    env);
 	env = new_cons(list2(new_symbol("null"),    new_primop(primop_null)),    env);
 	env = new_cons(list2(new_symbol("car"),     new_primop(primop_car)),     env);

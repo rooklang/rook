@@ -196,6 +196,8 @@ The following _primops_ are built into the _Rook[0]_ language:
     equivalent.  Two strings are _eq_ if they contain if they are
     set-wise equivalent.
 
+ 1. `(ne a b)` - The opposite of `(eq a b)`.
+
  2. `(atom x)` - Returns truish if the value `x` is an atom (as
     opposed to a list).  The empty list is never an atom, but `#f`
     (the Boolean false value) is.
