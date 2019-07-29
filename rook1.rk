@@ -5,23 +5,42 @@
 ;; created: 2018-06-07
 ;;
 
-(let ((*label* 0))
+(let ((*label* 0)
+      (*register* 0))
   (functions
     ((bail (error)
+       "Bail out with an error.
+
+        The error will be printed to standard error,
+        on one or more lines, and the process will end
+        with an exit code of 1."
        (printf "error: ")
        (printf error)
        (printf "\n")
        (syscall 'exit 1))
+
+     ;; shorthand for (car (cdr ...)) combinations.
      (caar (x) (car (car x)))
      (cadr (x) (car (cdr x)))
      (caddr (x) (car (cdr (cdr x))))
      (cadddr (x) (car (cdr (cdr (cdr x)))))
 
      (newlabel ()
-       (+1 *label*)
-       (concat "label" *label*))
+       "Create a new RASM label.
+
+        Labels in RASM are globally unique.
+        This function guarantees this uniqueness when
+        generating new labels, for jumps and conditional
+        moves.  It relies on the `*label*` global variable."
+       (list 'label (+1 *label*)))
 
      (emit (l)
+       "Emit RASM code to standard output.
+
+        All NOP placeholders will be ignored during this
+        process, as a primitive peephole optimization that
+        allows the generative parts of the compiler to
+        create sub-optimal code for simplicity's sake."
        (cond ((null l) #t)
              ((eq 'nop (caar l))
               (emit (cdr l)))
@@ -31,6 +50,13 @@
               (emit (cdr l)))))
 
      (flatten (l)
+       "Flatten out a complex list into a simple list.
+
+        To simplify this implementation, I chose to have
+        the generative parts of the Rook[1] compiler
+        create tree-structure assembler codes, and then
+        rely on linearizing this 'bumpy' list via this
+        flatten operation."
        (cond ((null l) nil)
 
              ((atom (car l))
@@ -76,6 +102,7 @@
                  (list 'error "unrecognized sub-expression" e)))))
 
      (geneval (r e)
+       "Generate code for the evaluation process."
        (cond ((atom e)
               (list
                 (list 'load r e)))
