@@ -1,0 +1,28 @@
+::::::::::: ./rook0 rook1-stack.rk - ::::::::::::::::::
+a (printf ...) form compiles to RASM properly
+---
+(printf "rook")
+---
+(push "rook")
+(printf)
+===
+an (if ...) form compiles to RASM properly
+---
+(if 1
+  (printf "one")
+  (printf "not one..."))
+---
+(push 1)
+(push nil)
+(cmp)
+(je (label 2))
+(jmp (label 1))
+(label 1)
+(push "one")
+(printf)
+(jmp (label 3))
+(label 2)
+(push "not one...")
+(printf)
+(label 3)
+============

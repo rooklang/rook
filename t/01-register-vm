@@ -1,4 +1,4 @@
-::::::::::: ./rook0 rook1.rk - ::::::::::::::::::
+::::::::::: ./rook0 rook1-reg.rk - ::::::::::::::::::
 a (printf ...) form compiles to RASM properly
 ---
 (printf "rook")

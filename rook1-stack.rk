@@ -1,12 +1,14 @@
-;; rook1 - an interpreted bootstrapping compiler
-;;         for the Rook Lisp programming language.
+;; rook1-stack - an interpreted bootstrapping compiler
+;;               for the Rook Lisp programming language.
+;;
+;; This implementation of _Rook[1]_ targets a virtual
+;; stack machine.
 ;;
 ;; author:  James Hunt <james@niftylogic.com>
-;; created: 2018-06-07
+;; created: 2019-07-29
 ;;
 
-(let ((*label* 0)
-      (*register* 0))
+(let ((*label* 0))
   (functions
     ((bail (error)
        "Bail out with an error.
@@ -33,17 +35,6 @@
         generating new labels, for jumps and conditional
         moves.  It relies on the `*label*` global variable."
        (list 'label (+1 *label*)))
-
-     (newreg ()
-       "Create a new RASM register.
-
-        The initial translation of S-expressions into a
-        linearized pseudo-assembler dialect assumes that
-        the target (virtual) machine has an unlimited set
-        of registers.  Future passes of the compiler can
-        improve this situation and more efficiently target
-        actual machine hardware."
-       (list 'register (+1 *register*)))
 
      (emit (l)
        "Emit RASM code to standard output.
@@ -109,14 +100,12 @@
               (gencond (list 'not (list 'eq e 'nil)) ift iff))
 
              ((eq (car e) 'eq)
-              (let ((r1 (newreg))
-                    (r2 (newreg)))
-                (list
-                  (geneval r1 (cadr e))
-                  (geneval r2 (caddr e))
-                  (list 'cmp r1 r2)
-                  (list 'je ift)
-                  (list 'jmp iff))))
+              (list
+                (geneval (cadr e))
+                (geneval (caddr e))
+                (list 'cmp)
+                (list 'je ift)
+                (list 'jmp iff)))
 
              ((eq (car e) 'not)
               (gencond (cadr e) iff ift))
@@ -139,11 +128,11 @@
                (list
                  (list 'error "unrecognized sub-expression" e)))))
 
-     (geneval (r e)
+     (geneval (e)
        "Generate code for the evaluation process."
        (cond ((atom e)
               (list
-                (list 'load r e)))
+                (list 'push e)))
 
              ((eq (car e) 'if)
               (let ((ift (newlabel))
@@ -152,17 +141,17 @@
                 (list
                   (gencond (cadr e) ift iff)
                   ift
-                  (geneval r (caddr e))
+                  (geneval (caddr e))
                   (list 'jmp end)
                   iff
-                  (geneval r (cadddr e))
+                  (geneval (cadddr e))
                   end
                   (list 'nop))))
 
              ((eq (car e) 'printf)
                 (list
-                  (geneval r (cadr e))
-                  (list 'printf r)))
+                  (geneval (cadr e))
+                  (list 'printf)))
 
              (#t
                (list
@@ -176,7 +165,7 @@
                        (#t
                         (open (argn 0))))))
          (progn
-           (emit (flatten (geneval (newreg) (read fd))))
+           (emit (flatten (geneval (read fd))))
            (syscall 'exit 0)))))
 
      (main)))
