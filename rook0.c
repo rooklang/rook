@@ -889,6 +889,8 @@ primop_append(struct value *args)
 static struct value *
 primop_incf(struct value *args)
 {
+	struct value *v;
+
 	arity("(+1 ...)", args, 1, 1);
 	if (CAR(args)->type != NUMBER) {
 		fprintf(stderr, "non-number argument to +1\n");
@@ -896,7 +898,10 @@ primop_incf(struct value *args)
 	}
 
 	CAR(args)->number++;
-	return CAR(args);
+	v = make(struct value);
+	v->type = NUMBER;
+	v->number = CAR(args)->number;
+	return v;
 }
 
 static struct value *
