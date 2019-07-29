@@ -169,9 +169,14 @@
                  (list 'error "unhandled-toplevel" e)))))
 
      (main ()
-       (cond ((eq (args) 1) #t)
-             (#t (bail "USAGE: rook0 rook1.rk <script>")))
-       (emit (flatten (geneval (newreg) (read (open (argn 0))))))
-       (syscall 'exit 0)))
+       (let ((fd (cond ((ne 1 (args))
+                        (bail "USAGE: rook0 rook1.rk <script>"))
+                       ((eq (argn 0) "-")
+                        0)
+                       (#t
+                        (open (argn 0))))))
+         (progn
+           (emit (flatten (geneval (newreg) (read fd))))
+           (syscall 'exit 0)))))
 
      (main)))

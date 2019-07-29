@@ -1,0 +1,28 @@
+::::::::::: ./rook0 rook1.rk - ::::::::::::::::::
+a (printf ...) form compiles to RASM properly
+---
+(printf "rook")
+---
+(load (register 1) "rook")
+(printf (register 1))
+===
+an (if ...) form compiles to RASM properly
+---
+(if 1
+  (printf "one")
+  (printf "not one..."))
+---
+(load (register 2) 1)
+(load (register 3) nil)
+(cmp (register 2) (register 3))
+(je (label 2))
+(jmp (label 1))
+(label 1)
+(load (register 1) "one")
+(printf (register 1))
+(jmp (label 3))
+(label 2)
+(load (register 1) "not one...")
+(printf (register 1))
+(label 3)
+============
