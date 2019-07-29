@@ -1,3 +1,4 @@
+::::::::::: ./rook0 --evaluate --quiet - ::::::::::::::::::
 #t should evaluate to itself
 ---
 #t

@@ -7,16 +7,16 @@ my $rc = 0;
 my ($tmp_fh, $tmp_file) = tempfile;
 
 sub test {
-  my ($f, @src) = @_;
+  my ($f, $cmd, @src) = @_;
   @src == 3 or die "$f: malformed test case file\n";
   my ($test, $src, $want) = @src;
   chomp($test);
 
-  open my $pipe, "|-", "./rook0 --evaluate --quiet - >$tmp_file"
-    or die "$f: failed to exec ./rook0: $!\n";
+  open my $pipe, "|-", "$cmd >$tmp_file"
+    or die "$f: failed to exec `$cmd': $!\n";
   print $pipe $src;
   close $pipe
-    or die "$f: ./rook0 failed: $!\n";
+    or die "$f: `$cmd': failed: $!\n";
 
   seek $tmp_fh, 0, 0;
   my $got = do { local $/; <$tmp_fh>; };
@@ -41,21 +41,26 @@ for my $f (@ARGV) {
 
   open my $fh, "<", $f
     or die "unable to open $f: $!\n";
+  chomp(my $shebang = <$fh>);
+  my ($cmd) = ($shebang =~ m/^::+\s+(.*)\s+::+$/);
+
+  print "# $cmd\n";
   while (<$fh>) {
     if (m/^---+/) { $i++; next; }
     if (m/^===+/) {
-      test($f, @src);
+      test($f, $cmd, @src);
       @src = (); $i = 0;
       next;
     }
     $src[$i] .= $_;
   }
-  test($f, @src) if $i;
+  test($f, $cmd, @src) if $i;
   close $fh;
+  print "\n";
 }
 
 if ($rc == 0) {
-  print "\nALL TESTS PASSED\n";
+  print "ALL TESTS PASSED\n";
   exit 0;
 }
 print "\nSOME TESTS FAILED!!\n";
