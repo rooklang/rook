@@ -34,6 +34,17 @@
         moves.  It relies on the `*label*` global variable."
        (list 'label (+1 *label*)))
 
+     (newreg ()
+       "Create a new RASM register.
+
+        The initial translation of S-expressions into a
+        linearized pseudo-assembler dialect assumes that
+        the target (virtual) machine has an unlimited set
+        of registers.  Future passes of the compiler can
+        improve this situation and more efficiently target
+        actual machine hardware."
+       (list 'register (+1 *register*)))
+
      (emit (l)
        "Emit RASM code to standard output.
 
@@ -69,16 +80,43 @@
                          (flatten (cdr l))))))
 
      (gencond (e ift iff)
+       "Generate a conditional jump, to one of two labels.
+
+        The `ift` and `iff` arguments are taken as label names,
+        as returned by the `(newlabel ...)` function.  The `e`
+        code will expand into one or more predicate evaluations
+        (all in RASM).
+
+        Atoms are equated checked against nil (nil -> iff).
+
+        For `(eq a b)` forms, evaluative code for the operands
+        is generated, and then a comparison je/jmp is made.
+
+        For `(not e)` forms, a recursive call to `(gencond)` is
+        made, swapping the `ift` and `iff` labels to express
+        the negation.
+
+        For `(and x y)` forms, a new label is introduced for the
+        interim if-true branch that evalutes `x`, and two more
+        calls to `(gencond)` are stitched together.
+
+        For `(or x y)` forms, a new label is introduced for the
+        interim if-false (short-circuit) branch that evalutes `x`,
+        and two more calls to `(gencond)` are stitched together.
+
+        Any other input will bail the compiler."
        (cond ((atom e)
               (gencond (list 'not (list 'eq e 'nil)) ift iff))
 
              ((eq (car e) 'eq)
-              (list
-                (geneval 'r1 (cadr e))
-                (geneval 'r2 (caddr e))
-                (list 'cmp 'r1 'r2)
-                (list 'je ift)
-                (list 'jmp iff)))
+              (let ((r1 (newreg))
+                    (r2 (newreg)))
+                (list
+                  (geneval r1 (cadr e))
+                  (geneval r2 (caddr e))
+                  (list 'cmp r1 r2)
+                  (list 'je ift)
+                  (list 'jmp iff))))
 
              ((eq (car e) 'not)
               (gencond (cadr e) iff ift))
@@ -124,7 +162,7 @@
              ((eq (car e) 'printf)
                 (list
                   (geneval r (cadr e))
-                  (list 'printf)))
+                  (list 'printf r)))
 
              (#t
                (list
@@ -133,7 +171,7 @@
      (main ()
        (cond ((eq (args) 1) #t)
              (#t (bail "USAGE: rook0 rook1.rk <script>")))
-       (emit (flatten (geneval 'r1 (read (open (argn 0))))))
+       (emit (flatten (geneval (newreg) (read (open (argn 0))))))
        (syscall 'exit 0)))
 
      (main)))
