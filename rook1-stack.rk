@@ -8,7 +8,8 @@
 ;; created: 2019-07-29
 ;;
 
-(let ((*label* 0))
+(let ((*label* 0)
+      (*fn* (list)))
   (functions
     ((bail (error)
        "Bail out with an error.
@@ -24,7 +25,9 @@
      ;; shorthand for (car (cdr ...)) combinations.
      (caar (x) (car (car x)))
      (cadr (x) (car (cdr x)))
+     (cdar (x) (cdr (car x)))
      (caddr (x) (car (cdr (cdr x))))
+     (caadr (x) (car (car (cdr x))))
      (cadddr (x) (car (cdr (cdr (cdr x)))))
 
      (newlabel ()
@@ -69,6 +72,16 @@
 
              (#t (append (flatten (car l))
                          (flatten (cdr l))))))
+
+     (find-fn (name lst)
+       (cond ((null lst)
+              (list 'error "undefined function"))
+
+             ((eq (caar lst) name)
+              (cdar lst))
+
+             (#t
+              (find-fn name (cdr lst)))))
 
      (gencond (e ift iff)
        "Generate a conditional jump, to one of two labels.
@@ -153,9 +166,47 @@
                   (geneval (cadr e))
                   (list 'printf)))
 
+             ((eq (car e) '-)
+              (list
+                (geneval (cadr e))
+                (geneval (caddr e))
+                (list 'isub)))
+
+             ((eq (car e) '+)
+              (list
+                (geneval (cadr e))
+                (geneval (caddr e))
+                (list 'iadd)))
+
+             ((eq (car e) 'fn)
+              (let ((fn (newlabel)))
+                (progn
+                  (setf *fn* (cons (cons (caadr e) fn) *fn*))
+                  (list
+                    fn
+                    (genlambda (cadr e)
+                               (caddr e))))))
+
              (#t
+               (let ((fn (find-fn (car e) *fn*)))
+                 (cond ((null fn)
+                        (list 'error "unhandled-toplevel" e))
+                       (#t
+                        (gencall fn (cdr e) 0)))))))
+
+     (gencall (fn actuals nargs)
+        (cond ((null actuals)
+               (list 'call fn nargs))
+
+              (#t
                (list
-                 (list 'error "unhandled-toplevel" e)))))
+                 (geneval (car actuals))
+                 (gencall fn (cdr actuals) (+1 nargs))))))
+
+     (genlambda (args body)
+       "Generate the body of a function block."
+       (list (geneval body)
+             (list 'ret)))
 
      (main ()
        (let ((fd (cond ((ne 1 (args))

@@ -1001,6 +1001,14 @@ primop_argn(struct value *args)
 }
 
 static struct value *
+primop_dump(struct value *args)
+{
+	fprintv(stderr, 4, args);
+	fprintf(stderr, "\n");
+	return args;
+}
+
+static struct value *
 eval(struct value *, struct value *);
 
 static struct value *
@@ -1020,6 +1028,9 @@ assoc(struct value *, struct value *);
 
 static struct value *
 pair(struct value *, struct value *);
+
+static struct value *
+setf(struct value **, struct value *, struct value *);
 
 static struct value *
 eval(struct value *expr, struct value *env)
@@ -1073,6 +1084,11 @@ eval(struct value *expr, struct value *env)
 			}
 
 			return eval(CADDR(expr), env);
+		}
+
+		if (CAR(expr)->symbol == intern("setf")) {
+			arity("(setf ...)", CDR(expr), 2, 2);
+			return setf(&env, CADR(expr), eval(CADDR(expr), env));
 		}
 
 		if (CAR(expr)->symbol == intern("functions")) {
@@ -1204,6 +1220,30 @@ pair(struct value *x, struct value *y)
 }
 
 static struct value *
+setf(struct value **env, struct value *var, struct value *value)
+{
+	struct value *alst;
+
+	if (var->type != SYMBOL) {
+		fprintf(stderr, "invalid setf(...) call -- var is not a symbol.\n");
+		exit(3);
+	}
+
+	alst = *env;
+	while (alst && CAR(alst)) {
+		if (CAAR(alst)->type == SYMBOL
+		 && CAAR(alst)->symbol == var->symbol) {
+			CADAR(alst) = value;
+			return value;
+		}
+		alst = CDR(alst);
+	}
+
+	*env = new_cons(new_cons(var, value), *env);
+	return value;
+}
+
+static struct value *
 init()
 {
 	struct value *env = NULL;
@@ -1236,6 +1276,7 @@ init()
 	env = new_cons(list2(new_symbol("concat"),  new_primop(primop_concat)),  env);
 	env = new_cons(list2(new_symbol("args"),    new_primop(primop_args)),    env);
 	env = new_cons(list2(new_symbol("argn"),    new_primop(primop_argn)),    env);
+	env = new_cons(list2(new_symbol("dump"),    new_primop(primop_dump)),    env);
 	return env;
 }
 
